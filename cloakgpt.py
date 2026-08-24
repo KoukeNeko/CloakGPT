@@ -4,11 +4,31 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from cloakbrowser import launch_persistent_context
+
 from chatgpt_browser import (
+    CHATGPT_URL,
+    DEFAULT_PROFILE_DIR,
     REASONING_LEVEL_LABELS,
     continue_conversation,
     start_conversation,
 )
+
+
+def login(timezone: str) -> None:
+    """Open the persistent browser profile for an interactive ChatGPT login."""
+    context = launch_persistent_context(
+        str(DEFAULT_PROFILE_DIR),
+        headless=False,
+        locale="ja-JP",
+        timezone=timezone,
+    )
+    try:
+        page = context.new_page()
+        page.goto(CHATGPT_URL, wait_until="domcontentloaded")
+        input("Sign in in the browser window, then press Enter here to save the session...")
+    finally:
+        context.close()
 
 
 def _add_shared_options(parser: argparse.ArgumentParser) -> None:
@@ -37,6 +57,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
+    login_parser = commands.add_parser(
+        "login",
+        help="open the persistent profile for interactive login",
+    )
+    login_parser.add_argument(
+        "--timezone",
+        default="Asia/Taipei",
+        help="user's IANA timezone (default: Asia/Taipei)",
+    )
+
     ask_parser = commands.add_parser("ask", help="start a new conversation")
     _add_shared_options(ask_parser)
 
@@ -50,9 +80,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    operation = start_conversation if args.command == "ask" else continue_conversation
 
     try:
+        if args.command == "login":
+            login(args.timezone)
+            return 0
+
+        operation = (
+            start_conversation if args.command == "ask" else continue_conversation
+        )
         answer = operation(
             args.question,
             timezone=args.timezone,

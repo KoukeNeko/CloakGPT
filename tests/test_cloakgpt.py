@@ -1,12 +1,34 @@
 import io
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import cloakgpt
 
 
 class CloakGPTCliTests(unittest.TestCase):
+    @patch("builtins.input", return_value="")
+    @patch("cloakgpt.launch_persistent_context")
+    def test_login_command(self, launch_persistent_context, user_input) -> None:
+        context = Mock()
+        launch_persistent_context.return_value = context
+
+        result = cloakgpt.main(["login", "--timezone", "Asia/Taipei"])
+
+        self.assertEqual(result, 0)
+        launch_persistent_context.assert_called_once_with(
+            str(cloakgpt.DEFAULT_PROFILE_DIR),
+            headless=False,
+            locale="ja-JP",
+            timezone="Asia/Taipei",
+        )
+        context.new_page.return_value.goto.assert_called_once_with(
+            cloakgpt.CHATGPT_URL,
+            wait_until="domcontentloaded",
+        )
+        user_input.assert_called_once()
+        context.close.assert_called_once_with()
+
     @patch("cloakgpt.start_conversation", return_value="First answer")
     def test_ask_command(self, start_conversation) -> None:
         output = io.StringIO()
