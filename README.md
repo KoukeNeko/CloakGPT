@@ -10,13 +10,11 @@ return the final response with Markdown formatting and citation sources.
 ## Install a release
 
 The installers download the executable for the current platform, verify its
-SHA-256 checksum, and install it for the current user. CloakBrowser downloads
-its Chromium binary on first use, so the first launch requires network access.
-Pre-download the external browser after installing CloakGPT with:
-
-```sh
-cloakgpt browser install
-```
+SHA-256 checksum, install it for the current user, and then download the
+external CloakBrowser binary. If the browser download fails, CloakGPT remains
+installed and the script prints a retry command. When custom CloakBrowser path,
+cache, license, version, channel, or download URL environment variables are
+detected, the failure message identifies the variables that should be checked.
 
 ### Linux and macOS
 
