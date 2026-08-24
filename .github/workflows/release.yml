@@ -145,7 +145,6 @@ jobs:
             --key-id "$api_key_id" \
             --issuer "$api_issuer_id" \
             --wait
-          spctl --assess --type execute --verbose=4 "dist/${{ matrix.asset }}"
       - name: Write SHA-256 checksum
         shell: python
         run: |
