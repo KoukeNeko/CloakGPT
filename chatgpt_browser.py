@@ -13,7 +13,7 @@ CHATGPT_URL = "https://chatgpt.com/"
 PROMPT_EDITOR_SELECTOR = "#prompt-textarea"
 SEND_BUTTON_SELECTOR = '[data-testid="send-button"]'
 ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]'
-COPY_ACTION_SELECTOR = '[data-testid="copy-turn-action-button"]'
+STOP_BUTTON_SELECTOR = '[data-testid="stop-button"]'
 REASONING_TRIGGER_SELECTOR = (
     'form button[aria-haspopup="menu"]:not(#composer-plus-btn)'
 )
@@ -94,7 +94,6 @@ def _emit_status(callback: StatusCallback | None, message: str) -> None:
 def _wait_for_reply(
     page,
     previous_count: int,
-    previous_copy_count: int,
     status_callback: StatusCallback | None,
 ) -> str:
     page.wait_for_function(
@@ -106,10 +105,27 @@ def _wait_for_reply(
     )
     _emit_status(status_callback, "ChatGPT is responding...")
     page.wait_for_function(
-        """previousCount =>
-        document.querySelectorAll('[data-testid="copy-turn-action-button"]').length
-        > previousCount""",
-        arg=previous_copy_count,
+        """previousCount => {
+        const messages = document.querySelectorAll(
+          '[data-message-author-role="assistant"]'
+        );
+        const response = messages[messages.length - 1];
+        const stopButtonVisible = [...document.querySelectorAll(
+          '[data-testid="stop-button"]'
+        )].some(stopButton => !!(
+          stopButton.offsetWidth
+          || stopButton.offsetHeight
+          || stopButton.getClientRects().length
+        ));
+        const messageId = response?.getAttribute('data-message-id') || '';
+        return messages.length > previousCount
+          && response?.innerText.trim()
+          && !messageId.startsWith('request-placeholder-')
+          && !response.querySelector('[aria-busy="true"]')
+          && !response.querySelector('.streaming-animation')
+          && !stopButtonVisible;
+        }""",
+        arg=previous_count,
         timeout=0,
     )
     return page.locator(ASSISTANT_MESSAGE_SELECTOR).last.inner_text().strip()
@@ -250,7 +266,6 @@ def _send_message(
         editor = page.locator(PROMPT_EDITOR_SELECTOR)
         editor.wait_for(state="visible", timeout=30_000)
         previous_count = page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
-        previous_copy_count = page.locator(COPY_ACTION_SELECTOR).count()
         editor.fill(question)
 
         send_button = page.locator(SEND_BUTTON_SELECTOR)
@@ -262,7 +277,6 @@ def _send_message(
         answer = _wait_for_reply(
             page,
             previous_count,
-            previous_copy_count,
             status_callback,
         )
         _emit_status(status_callback, "Response complete.")

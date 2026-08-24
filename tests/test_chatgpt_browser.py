@@ -49,8 +49,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.responses = Mock()
         self.responses.count.return_value = 0
         self.responses.last.inner_text.return_value = "OK."
-        self.copy_actions = Mock()
-        self.copy_actions.count.return_value = 0
 
         self.page = Mock()
         self.page.url = "https://chatgpt.com/c/test-conversation"
@@ -58,7 +56,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
             chatgpt_browser.PROMPT_EDITOR_SELECTOR: self.editor,
             chatgpt_browser.SEND_BUTTON_SELECTOR: self.send_button,
             chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: self.responses,
-            chatgpt_browser.COPY_ACTION_SELECTOR: self.copy_actions,
             chatgpt_browser.REASONING_TRIGGER_SELECTOR: self.reasoning_trigger,
         }
         visible_menus = Mock()
@@ -187,6 +184,11 @@ class ChatGPTBrowserTests(unittest.TestCase):
         status_callback.assert_any_call("Response complete.")
         for call in self.page.wait_for_function.call_args_list:
             self.assertEqual(call.kwargs["timeout"], 0)
+        completion_predicate = self.page.wait_for_function.call_args_list[1].args[0]
+        self.assertIn('data-testid="stop-button"', completion_predicate)
+        self.assertIn("request-placeholder-", completion_predicate)
+        self.assertIn('aria-busy="true"', completion_predicate)
+        self.assertIn("streaming-animation", completion_predicate)
 
     def test_rejects_invalid_saved_url(self) -> None:
         self.state_file.write_text("https://example.com/c/test", encoding="utf-8")

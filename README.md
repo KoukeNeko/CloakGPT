@@ -42,7 +42,8 @@ The default user timezone is `Asia/Taipei`. Override it with an IANA timezone:
 The command opens a visible browser, sends the message, waits for the response
 to finish, prints the response text, and saves the conversation URL. It waits
 without a response deadline because generation time depends on the model and
-prompt; press Ctrl+C to stop it manually.
+prompt. Completion is detected from ChatGPT's active generation and assistant
+turn state rather than text stability; press Ctrl+C to stop it manually.
 
 Browser progress and the current ChatGPT page settings are printed to stderr:
 
