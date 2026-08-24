@@ -81,45 +81,83 @@ so the same `SKILL.md` works with Claude Code, Codex, Gemini CLI, and other
 compatible coding agents. Review the skill before installing it; an agent will
 follow its instructions with the permissions available to that agent.
 
-If you do not know which agent-specific directory to use, let a universal
-installer detect or ask for the target. With a recent GitHub CLI:
+Use the cross-agent `skills` installer and name the target agent explicitly:
+Replace `AGENT_SLUG` with a literal value such as `claude-code`, `codex`, or
+`gemini-cli`.
 
 ```sh
-gh skill install KoukeNeko/CloakGPT skills/use-cloakgpt --scope user
+npx -y skills add https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt -g -a AGENT_SLUG -s use-cloakgpt -y
 ```
 
-Alternatively, with Node.js installed:
+Common slugs and their user-level destinations are:
 
-```sh
-npx skills add https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt -g
-```
+| Agent | Slug | Expected `SKILL.md` |
+| --- | --- | --- |
+| Claude Code | `claude-code` | `~/.claude/skills/use-cloakgpt/SKILL.md` |
+| Codex | `codex` | `$CODEX_HOME/skills/use-cloakgpt/SKILL.md`, or `~/.codex/skills/use-cloakgpt/SKILL.md` when `CODEX_HOME` is unset |
+| Gemini CLI | `gemini-cli` | `~/.gemini/skills/use-cloakgpt/SKILL.md` |
 
-Both commands install at user scope and prompt for missing host information in
-an interactive terminal. For a non-interactive installation, pass the current
-agent explicitly: `claude-code`, `codex`, or `gemini-cli`.
+Do not treat a successful installer exit code as proof that the current agent
+can discover the skill. Check the native destination and reload or restart the
+agent when required.
 
 ### Instructions for an agent
 
-Paste the following into the coding agent that should use CloakGPT:
+Paste the following complete task into the coding agent that should use
+CloakGPT. It includes installation, fallback, and verification instead of
+assuming that one command succeeded:
 
 ```text
-Install the portable Agent Skill from
+Install the portable Agent Skill named `use-cloakgpt` from
 https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt
-for your own agent runtime at user scope. Review SKILL.md first. Detect your
-actual host instead of assuming Codex. Prefer:
+for your own agent runtime at user scope.
 
-gh skill install KoukeNeko/CloakGPT skills/use-cloakgpt \
-  --agent <your-agent-slug> --scope user
+This task is complete only after you verify discovery. Do not claim success
+merely because an installer returned exit code 0.
 
-If `gh skill install` is unavailable, use:
+1. Identify the agent runtime you are currently running in. Do not assume
+   Codex. Determine its exact `skills --agent` slug and native
+   user-level skills directory. Known mappings are Claude Code = `claude-code`
+   and `~/.claude/skills`, Codex = `codex` and `CODEX_HOME/skills` when
+   `CODEX_HOME` is set or `~/.codex/skills` otherwise, and Gemini CLI =
+   `gemini-cli` and `~/.gemini/skills`. For another runtime, inspect
+   `npx -y skills --help` and that runtime's local or official documentation
+   instead of guessing.
+2. Read the source `SKILL.md` before installing it. If a skill named
+   `use-cloakgpt` already exists, inspect it first. Overwrite it only when it
+   came from this same repository; otherwise stop and report the conflict.
+3. Run this cross-agent installer command, substituting your literal agent slug
+   (do not leave a placeholder):
 
-npx skills add \
-  https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt \
-  -g -a <your-agent-slug> -y
+   npx -y skills add https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt -g -a AGENT_SLUG -s use-cloakgpt -y
 
-Use claude-code for Claude Code, codex for Codex, or gemini-cli for Gemini CLI.
-Verify that use-cloakgpt was installed, then tell me whether your host needs a
-new turn or restart before it can discover the skill.
+4. Run `npx -y skills list -g -a AGENT_SLUG --json` and locate the
+   `use-cloakgpt` entry. Then check the runtime's native destination directly.
+   Some installer/runtime combinations may create only the canonical
+   `~/.agents/skills/use-cloakgpt` copy. If the current runtime does not discover
+   that canonical path, copy the entire canonical directory into its native
+   user-level skills directory before continuing.
+5. If Node.js or `npx` is unavailable, use
+   `gh skill install KoukeNeko/CloakGPT skills/use-cloakgpt --agent AGENT_SLUG --scope user`.
+   If that is also unavailable, clone or download the repository into a
+   temporary directory and copy the entire `skills/use-cloakgpt` directory into
+   the confirmed native user-level skills directory. Do not use a guessed
+   directory. Preserve the filename exactly as uppercase `SKILL.md`.
+6. Read the installed file from its final native path and verify that its YAML
+   frontmatter contains `name: use-cloakgpt` and has a non-empty
+   `description`. An installer-managed source metadata field is acceptable.
+7. Make the current runtime rescan its skills when supported. Gemini CLI uses
+   `/skills reload` followed by `/skills list`. Claude Code normally detects
+   changes live, but must be restarted if its top-level skills directory did
+   not exist when the session began. For Codex, start a new turn or session and
+   confirm that `use-cloakgpt` appears in the available skills. Follow the
+   runtime's documented equivalent for another agent.
+8. Do not send a ChatGPT message just to test installation. Finish by reporting
+   the detected runtime, installer or fallback used, exact installed path, the
+   verified frontmatter name, and whether runtime discovery was confirmed. If
+   network access, filesystem permissions, or a missing required tool prevents
+   completion, report the exact blocker and do not describe the installation
+   as successful.
 ```
 
 The skill teaches an agent how to use an already installed local CloakGPT CLI.
