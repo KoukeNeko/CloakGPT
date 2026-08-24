@@ -34,7 +34,16 @@ class CloakGPTCliTests(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             result = cloakgpt.main(
-                ["ask", "Hello", "--reasoning", "high", "--timezone", "Asia/Taipei"]
+                [
+                    "ask",
+                    "Hello",
+                    "--model",
+                    "gpt-5.5",
+                    "--reasoning",
+                    "high",
+                    "--timezone",
+                    "Asia/Taipei",
+                ]
             )
 
         self.assertEqual(result, 0)
@@ -43,7 +52,8 @@ class CloakGPTCliTests(unittest.TestCase):
             "Hello",
             timezone="Asia/Taipei",
             timeout_seconds=120,
-            reasoning_level="high",
+            model=cloakgpt.ChatGPTModel.GPT_5_5,
+            reasoning_level=cloakgpt.ReasoningLevel.HIGH,
         )
 
     @patch("cloakgpt.continue_conversation", return_value="Next answer")
@@ -58,6 +68,7 @@ class CloakGPTCliTests(unittest.TestCase):
             "More details",
             timezone="Asia/Taipei",
             timeout_seconds=120,
+            model=None,
             reasoning_level=None,
         )
 

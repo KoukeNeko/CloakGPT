@@ -8,8 +8,9 @@ from cloakbrowser import launch_persistent_context
 
 from chatgpt_browser import (
     CHATGPT_URL,
+    ChatGPTModel,
     DEFAULT_PROFILE_DIR,
-    REASONING_LEVEL_INDEXES,
+    ReasoningLevel,
     continue_conversation,
     start_conversation,
 )
@@ -45,8 +46,15 @@ def _add_shared_options(parser: argparse.ArgumentParser) -> None:
         help="maximum wait in seconds (default: 120)",
     )
     parser.add_argument(
+        "--model",
+        type=ChatGPTModel,
+        choices=list(ChatGPTModel),
+        help="model; omit to keep ChatGPT's current setting",
+    )
+    parser.add_argument(
         "--reasoning",
-        choices=REASONING_LEVEL_INDEXES,
+        type=ReasoningLevel,
+        choices=list(ReasoningLevel),
         help="reasoning level; omit to keep ChatGPT's current setting",
     )
 
@@ -93,6 +101,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.question,
             timezone=args.timezone,
             timeout_seconds=args.timeout,
+            model=args.model,
             reasoning_level=args.reasoning,
         )
     except Exception as error:

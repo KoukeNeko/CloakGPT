@@ -19,9 +19,13 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.root_menu.first = self.root_menu
         self.advanced_view = Mock()
         self.advanced_view.count.return_value = 1
+        self.model_item = Mock()
         self.reasoning_item = Mock()
         self.submenu_items = Mock()
         self.submenu_items.count.return_value = 2
+        self.submenu_items.nth.side_effect = (
+            lambda index: [self.model_item, self.reasoning_item][index]
+        )
         self.submenu_items.last = self.reasoning_item
         self.root_menu.locator.side_effect = {
             chatgpt_browser.ADVANCED_VIEW_SELECTOR: self.advanced_view,
@@ -35,6 +39,11 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.reasoning_options = Mock()
         self.reasoning_options.count.return_value = 3
         self.reasoning_options.nth.return_value = self.reasoning_option
+        self.model_option = Mock()
+        self.model_match = Mock()
+        self.model_match.count.return_value = 1
+        self.model_match.first = self.model_option
+        self.reasoning_options.filter.return_value = self.model_match
         self.reasoning_menu.locator.return_value = self.reasoning_options
         self.responses = Mock()
         self.responses.count.return_value = 0
@@ -95,11 +104,24 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.editor.fill.assert_any_call("First")
         self.editor.fill.assert_any_call("Second")
         self.assertEqual(self.send_button.click.call_count, 2)
+        self.reasoning_trigger.click.assert_not_called()
+
+    def test_selects_requested_model(self) -> None:
+        chatgpt_browser.start_conversation(
+            "Hello",
+            model=chatgpt_browser.ChatGPTModel.GPT_5_5,
+            profile_dir=self.profile_dir,
+            state_file=self.state_file,
+        )
+
+        self.model_item.click.assert_called_once_with()
+        self.reasoning_options.filter.assert_called_once_with(has_text="GPT-5.5")
+        self.model_option.click.assert_called_once_with()
 
     def test_selects_requested_reasoning_level(self) -> None:
         chatgpt_browser.start_conversation(
             "Think",
-            reasoning_level="high",
+            reasoning_level=chatgpt_browser.ReasoningLevel.HIGH,
             profile_dir=self.profile_dir,
             state_file=self.state_file,
         )
@@ -117,7 +139,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Log in to configure reasoning"):
             chatgpt_browser.start_conversation(
                 "Think",
-                reasoning_level="high",
+                reasoning_level=chatgpt_browser.ReasoningLevel.HIGH,
                 profile_dir=self.profile_dir,
                 state_file=self.state_file,
             )
@@ -127,13 +149,14 @@ class ChatGPTBrowserTests(unittest.TestCase):
 
         chatgpt_browser.start_conversation(
             "Think",
-            reasoning_level="high",
+            reasoning_level=chatgpt_browser.ReasoningLevel.HIGH,
             profile_dir=self.profile_dir,
             state_file=self.state_file,
         )
 
         self.reasoning_option.click.assert_not_called()
-        self.page.keyboard.press.assert_called_once_with("Escape")
+        self.assertEqual(self.page.keyboard.press.call_count, 2)
+        self.page.keyboard.press.assert_called_with("Escape")
 
     def test_rejects_invalid_saved_url(self) -> None:
         self.state_file.write_text("https://example.com/c/test", encoding="utf-8")

@@ -52,14 +52,22 @@ This reopens the conversation saved by the most recent `ask` command.
 
 ## Select a reasoning level
 
-Use `--reasoning` with either `ask` or `continue`:
+Use `--model` and/or `--reasoning` with either `ask` or `continue`:
 
 ```powershell
-.\.venv\Scripts\python.exe cloakgpt.py ask "Solve this carefully." --reasoning high
+.\.venv\Scripts\python.exe cloakgpt.py ask "Solve this carefully." --model gpt-5.6-sol --reasoning high
 ```
 
-Supported CLI values map to the three reasoning options currently exposed by
-the advanced composer menu:
+Current model values are defined by the `ChatGPTModel` enum:
+
+| CLI value | ChatGPT label |
+| --- | --- |
+| `gpt-5.6-sol` | GPT-5.6 Sol |
+| `gpt-5.5` | GPT-5.5 |
+| `o3` | o3 |
+
+Reasoning values are defined by the `ReasoningLevel` enum and map to the three
+options currently exposed by the advanced composer menu:
 
 | CLI value | ChatGPT label |
 | --- | --- |
@@ -67,10 +75,11 @@ the advanced composer menu:
 | `medium` | 中程度 |
 | `high` | 高い |
 
-Omit `--reasoning` to keep ChatGPT's current selection. Availability depends
-on the signed-in account's plan and workspace settings. If a requested level
-is unavailable, the CLI reports the visible model menu instead of changing a
-private ChatGPT API.
+Both options default to `None`. Omit `--model` to keep the current model, and
+omit `--reasoning` to keep the current reasoning level; the corresponding menu
+is not opened or changed. Availability depends on the signed-in account's plan
+and workspace settings. If a requested value is unavailable, the CLI reports
+the visible menu instead of changing a private ChatGPT API.
 
 Other options:
 
