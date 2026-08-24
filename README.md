@@ -2,7 +2,7 @@
 
 CloakGPT automates a user-owned ChatGPT browser session with CloakBrowser.
 The CLI can start a conversation, continue the last conversation, select an
-available reasoning level, and print the assistant's response text.
+available reasoning level, and print the assistant's response as Markdown.
 
 ## Setup
 
@@ -53,11 +53,31 @@ Browser progress and the current ChatGPT page settings are printed to stderr:
 [status] Sending message...
 [status] Waiting for ChatGPT response (Ctrl+C to stop)...
 [status] ChatGPT is responding...
+[status] Collecting response and sources...
 [status] Response complete.
 ```
 
 Only the final response is printed to stdout, so it can be redirected or piped
-without including status lines.
+without including status lines. Rendered headings, lists, links, quotes, code
+blocks, and tables are converted back to Markdown. When ChatGPT cites web
+pages, citation pills and their source carousel are collected into a numbered
+`## Sources` section. Duplicate URLs are removed and ChatGPT's `utm_source`
+tracking parameter is omitted. Interactive DIL widgets such as weather charts
+are omitted because they do not have a faithful terminal representation; the
+model's accompanying text summary remains in the response.
+
+Example:
+
+```markdown
+台北最近天氣偏悶熱且不穩定。
+
+## Sources
+
+1. [臺北市一週天氣預報](https://example.com/taipei-weather)
+2. [颱風影響時間預測](https://example.org/typhoon-report)
+```
+
+Answers without web citations are printed without an empty Sources section.
 
 ## Continue the conversation
 

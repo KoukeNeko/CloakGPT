@@ -49,6 +49,10 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.responses = Mock()
         self.responses.count.return_value = 0
         self.responses.last.inner_text.return_value = "OK."
+        self.responses.last.evaluate.return_value = "OK."
+        self.citation_pills = Mock()
+        self.citation_pills.count.return_value = 0
+        self.responses.last.locator.return_value = self.citation_pills
 
         self.page = Mock()
         self.page.url = "https://chatgpt.com/c/test-conversation"
@@ -181,6 +185,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "Waiting for ChatGPT response (Ctrl+C to stop)..."
         )
         status_callback.assert_any_call("ChatGPT is responding...")
+        status_callback.assert_any_call("Collecting response and sources...")
         status_callback.assert_any_call("Response complete.")
         for call in self.page.wait_for_function.call_args_list:
             self.assertEqual(call.kwargs["timeout"], 0)
@@ -199,6 +204,129 @@ class ChatGPTBrowserTests(unittest.TestCase):
                 profile_dir=self.profile_dir,
                 state_file=self.state_file,
             )
+
+    def test_formats_sources_as_markdown_and_deduplicates_urls(self) -> None:
+        response = chatgpt_browser._format_response(
+            "## Answer\n\nIt is rainy.",
+            [
+                chatgpt_browser.ChatGPTSource(
+                    "example.com",
+                    "https://example.com/weather",
+                ),
+                chatgpt_browser.ChatGPTSource(
+                    "Weather [forecast]",
+                    "https://example.com/weather",
+                ),
+                chatgpt_browser.ChatGPTSource(
+                    "Second source",
+                    "https://second.example/report",
+                ),
+            ],
+        )
+
+        self.assertEqual(
+            response,
+            "## Answer\n\nIt is rainy.\n\n## Sources\n\n"
+            "1. [Weather \\[forecast\\]](https://example.com/weather)\n"
+            "2. [Second source](https://second.example/report)",
+        )
+
+    def test_source_parser_removes_chatgpt_tracking_parameter(self) -> None:
+        source = chatgpt_browser._source_from_link(
+            "https://example.com/weather?id=1&utm_source=chatgpt.com#today",
+            "example.com\nWeather forecast\nToday",
+        )
+
+        self.assertEqual(
+            source,
+            chatgpt_browser.ChatGPTSource(
+                title="Weather forecast",
+                url="https://example.com/weather?id=1#today",
+            ),
+        )
+
+    def test_extracts_direct_source_when_popover_is_unavailable(self) -> None:
+        response = Mock()
+        pills = Mock()
+        pills.count.return_value = 1
+        pill = pills.nth.return_value
+        direct_links = pill.locator.return_value
+        direct_links.count.return_value = 1
+        direct_link = direct_links.first
+        direct_link.get_attribute.return_value = (
+            "https://example.com/report?utm_source=chatgpt.com"
+        )
+        direct_link.inner_text.return_value = "example.com"
+        response.locator.return_value = pills
+
+        page = Mock()
+        page.locator.return_value.count.return_value = 0
+
+        sources = chatgpt_browser._extract_sources(page, response)
+
+        self.assertEqual(
+            sources,
+            [
+                chatgpt_browser.ChatGPTSource(
+                    title="example.com",
+                    url="https://example.com/report",
+                )
+            ],
+        )
+        pill.hover.assert_called_once_with()
+        page.wait_for_timeout.assert_called_once_with(750)
+
+    def test_extracts_all_sources_from_citation_carousel(self) -> None:
+        response = Mock()
+        pills = Mock()
+        pills.count.return_value = 1
+        pill = pills.nth.return_value
+        pill.locator.return_value.count.return_value = 0
+        response.locator.return_value = pills
+
+        page = Mock()
+        popovers = page.locator.return_value
+        popovers.count.return_value = 1
+        popover = popovers.first
+        popover.inner_text.return_value = "1/2"
+        links = Mock()
+        links.count.return_value = 1
+        link = links.first
+        link.get_attribute.side_effect = [
+            "https://first.example/report",
+            "https://second.example/report",
+        ]
+        link.inner_text.side_effect = [
+            "first.example\nFirst report",
+            "second.example\nSecond report",
+        ]
+        buttons = Mock()
+        buttons.count.return_value = 2
+        popover.locator.side_effect = {
+            "a[href]": links,
+            "button": buttons,
+        }.get
+
+        sources = chatgpt_browser._extract_sources(page, response)
+
+        self.assertEqual(
+            sources,
+            [
+                chatgpt_browser.ChatGPTSource(
+                    title="First report",
+                    url="https://first.example/report",
+                ),
+                chatgpt_browser.ChatGPTSource(
+                    title="Second report",
+                    url="https://second.example/report",
+                ),
+            ],
+        )
+        buttons.nth.assert_called_once_with(1)
+        buttons.nth.return_value.click.assert_called_once_with(
+            force=True,
+            timeout=5_000,
+        )
 
 
 if __name__ == "__main__":

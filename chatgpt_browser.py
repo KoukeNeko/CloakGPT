@@ -1,10 +1,11 @@
 """Browser automation core for a user-owned ChatGPT session."""
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from cloakbrowser import launch_persistent_context
 
@@ -14,6 +15,8 @@ PROMPT_EDITOR_SELECTOR = "#prompt-textarea"
 SEND_BUTTON_SELECTOR = '[data-testid="send-button"]'
 ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]'
 STOP_BUTTON_SELECTOR = '[data-testid="stop-button"]'
+CITATION_PILL_SELECTOR = '[data-testid="webpage-citation-pill"]'
+SOURCE_POPOVER_SELECTOR = '[data-radix-popper-content-wrapper]:visible'
 REASONING_TRIGGER_SELECTOR = (
     'form button[aria-haspopup="menu"]:not(#composer-plus-btn)'
 )
@@ -71,6 +74,116 @@ class ChatGPTPageStatus:
     reasoning: str
 
 
+@dataclass(frozen=True)
+class ChatGPTSource:
+    title: str
+    url: str
+
+
+RENDER_MARKDOWN_SCRIPT = r"""response => {
+  const citationSelector = '[data-testid="webpage-citation-pill"]';
+  const interactiveWidgetSelector = '[data-testid="dil-widget-shell"]';
+
+  function children(node) {
+    return [...node.childNodes].map(render).join('');
+  }
+
+  function list(node, ordered, depth = 0) {
+    let number = Number(node.getAttribute('start') || 1);
+    const items = [...node.children].filter(child => child.tagName === 'LI');
+    return items.map(item => {
+      const nestedLists = [...item.children].filter(
+        child => child.tagName === 'UL' || child.tagName === 'OL'
+      );
+      const body = [...item.childNodes]
+        .filter(child => !nestedLists.includes(child))
+        .map(render)
+        .join('')
+        .trim()
+        .replace(/\n+/g, ' ');
+      const prefix = ordered ? `${number++}. ` : '- ';
+      const nested = nestedLists.map(
+        child => list(child, child.tagName === 'OL', depth + 1).trimEnd()
+      ).join('\n');
+      return `${'  '.repeat(depth)}${prefix}${body}${nested ? `\n${nested}` : ''}`;
+    }).join('\n') + '\n\n';
+  }
+
+  function table(node) {
+    const rows = [...node.querySelectorAll('tr')].map(row =>
+      [...row.querySelectorAll(':scope > th, :scope > td')]
+        .map(cell => children(cell).trim().replace(/\|/g, '\\|'))
+    ).filter(row => row.length);
+    if (!rows.length) return '';
+    const width = Math.max(...rows.map(row => row.length));
+    const normalized = rows.map(row => [
+      ...row,
+      ...Array(Math.max(0, width - row.length)).fill('')
+    ]);
+    return normalized.map((row, index) => {
+      const line = `| ${row.join(' | ')} |`;
+      return index === 0
+        ? `${line}\n| ${row.map(() => '---').join(' | ')} |`
+        : line;
+    }).join('\n') + '\n\n';
+  }
+
+  function render(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    if (node.matches(`${citationSelector}, ${interactiveWidgetSelector}`)) return '';
+
+    const tag = node.tagName;
+    const content = () => children(node);
+    if (/^H[1-6]$/.test(tag)) {
+      return `${'#'.repeat(Number(tag[1]))} ${content().trim()}\n\n`;
+    }
+    if (tag === 'P') return `${content().trim()}\n\n`;
+    if (tag === 'BR') return '\n';
+    if (tag === 'UL') return list(node, false);
+    if (tag === 'OL') return list(node, true);
+    if (tag === 'LI') return content();
+    if (tag === 'BLOCKQUOTE') {
+      return content().trim().split('\n').map(line => `> ${line}`).join('\n') + '\n\n';
+    }
+    if (tag === 'PRE') {
+      const code = node.querySelector('code');
+      const text = (code || node).innerText.replace(/\n$/, '');
+      const languageClass = [...(code?.classList || [])].find(
+        name => name.startsWith('language-')
+      );
+      const language = languageClass ? languageClass.slice(9) : '';
+      const fence = text.includes('```') ? '````' : '```';
+      return `${fence}${language}\n${text}\n${fence}\n\n`;
+    }
+    if (tag === 'CODE') return `\`${content()}\``;
+    if (tag === 'STRONG' || tag === 'B') return `**${content()}**`;
+    if (tag === 'EM' || tag === 'I') return `*${content()}*`;
+    if (tag === 'DEL' || tag === 'S') return `~~${content()}~~`;
+    if (tag === 'A') {
+      const text = content().trim();
+      const href = node.getAttribute('href');
+      return href ? `[${text || href}](${href})` : text;
+    }
+    if (tag === 'IMG') {
+      const source = node.getAttribute('src');
+      return source ? `![${node.getAttribute('alt') || ''}](${source})` : '';
+    }
+    if (tag === 'HR') return '---\n\n';
+    if (tag === 'TABLE') return table(node);
+    if (tag === 'SUP') return `<sup>${content()}</sup>`;
+    if (tag === 'SUB') return `<sub>${content()}</sub>`;
+    return content();
+  }
+
+  const body = response.querySelector('.markdown') || response;
+  return render(body)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}"""
+
+
 def _validate_question(question: str) -> None:
     if not question.strip():
         raise ValueError("question must not be empty")
@@ -89,6 +202,96 @@ def _validate_conversation_url(url: str) -> None:
 def _emit_status(callback: StatusCallback | None, message: str) -> None:
     if callback is not None:
         callback(message)
+
+
+def _clean_source_url(url: str) -> str:
+    parts = urlsplit(url)
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            if key.lower() != "utm_source"
+        ]
+    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
+def _source_from_link(href: str | None, text: str) -> ChatGPTSource | None:
+    if not href:
+        return None
+    url = _clean_source_url(href)
+    parsed_url = urlparse(url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+        return None
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    title = lines[1] if len(lines) > 1 else parsed_url.hostname
+    return ChatGPTSource(title=title, url=url)
+
+
+def _format_response(markdown: str, sources: list[ChatGPTSource]) -> str:
+    sources_by_url: dict[str, ChatGPTSource] = {}
+    for source in sources:
+        existing = sources_by_url.get(source.url)
+        if existing is None or len(source.title) > len(existing.title):
+            sources_by_url[source.url] = source
+    unique_sources = list(sources_by_url.values())
+    if not unique_sources:
+        return markdown.strip()
+
+    source_lines = []
+    for index, source in enumerate(unique_sources, start=1):
+        title = source.title.replace("\\", "\\\\").replace("[", "\\[").replace(
+            "]", "\\]"
+        )
+        source_lines.append(f"{index}. [{title}]({source.url})")
+    return f"{markdown.strip()}\n\n## Sources\n\n" + "\n".join(source_lines)
+
+
+def _extract_sources(page, response) -> list[ChatGPTSource]:
+    sources: list[ChatGPTSource] = []
+    pills = response.locator(CITATION_PILL_SELECTOR)
+    for index in range(pills.count()):
+        pill = pills.nth(index)
+        direct_links = pill.locator("a[href]")
+        if direct_links.count():
+            direct_link = direct_links.first
+            direct_source = _source_from_link(
+                direct_link.get_attribute("href"), direct_link.inner_text()
+            )
+            if direct_source is not None:
+                sources.append(direct_source)
+
+        pill.hover()
+        page.wait_for_timeout(750)
+        popovers = page.locator(SOURCE_POPOVER_SELECTOR)
+        if not popovers.count():
+            continue
+        popover = popovers.first
+        counter = re.search(r"\b\d+/(\d+)\b", popover.inner_text())
+        source_count = int(counter.group(1)) if counter else 1
+        for source_index in range(source_count):
+            links = popover.locator("a[href]")
+            if not links.count():
+                break
+            link = links.first
+            source = _source_from_link(link.get_attribute("href"), link.inner_text())
+            if source is not None:
+                sources.append(source)
+            if source_index + 1 < source_count:
+                buttons = popover.locator("button")
+                if buttons.count() < 2:
+                    break
+                buttons.nth(1).click(force=True, timeout=5_000)
+                page.wait_for_timeout(300)
+        page.keyboard.press("Escape")
+    return sources
+
+
+def _extract_response(page) -> str:
+    response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
+    markdown = response.evaluate(RENDER_MARKDOWN_SCRIPT)
+    return _format_response(markdown, _extract_sources(page, response))
 
 
 def _wait_for_reply(
@@ -128,7 +331,8 @@ def _wait_for_reply(
         arg=previous_count,
         timeout=0,
     )
-    return page.locator(ASSISTANT_MESSAGE_SELECTOR).last.inner_text().strip()
+    _emit_status(status_callback, "Collecting response and sources...")
+    return _extract_response(page)
 
 
 def _open_advanced_submenu(page, submenu_index: int, menu_name: str):
