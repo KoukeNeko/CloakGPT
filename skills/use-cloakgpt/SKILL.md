@@ -1,6 +1,6 @@
 ---
 name: use-cloakgpt
-description: Use the local CloakGPT CLI to ask ChatGPT through the user's signed-in browser session, including persistent multi-turn agent sessions. Apply when the user explicitly wants an agent to send a prompt to ChatGPT, preserve ChatGPT model/reasoning settings, select supported settings, or return ChatGPT's Markdown answer and cited sources; do not use for ordinary questions that the agent can answer directly.
+description: Use or completely uninstall the local CloakGPT CLI. Apply when the user explicitly wants an agent to send a prompt through their signed-in ChatGPT browser session, manage a persistent multi-turn session, preserve or select supported page settings, return ChatGPT's Markdown answer and sources, or remove CloakGPT and its local data; do not use for ordinary questions the agent can answer directly.
 ---
 
 # Use CloakGPT
@@ -92,6 +92,42 @@ Use the least invasive recovery step:
 5. For a headless page-state failure, retry once with `--headed` only when a
    visible diagnostic run is acceptable. Persistent sessions require stopping
    the daemon before changing browser mode; do not stop it without permission.
+
+## Completely uninstall CloakGPT
+
+Run a complete uninstall only when the user explicitly requests it. If they
+have not already confirmed the destructive scope, explain that it permanently
+deletes the ChatGPT browser profile and cookies, conversation/session state,
+CloakBrowser downloads and cached license data, the executable, and all
+installed `use-cloakgpt` skill copies, then obtain confirmation.
+
+Use the official script from the CloakGPT repository. In a non-interactive
+agent terminal, add the confirmation flag only after the user has approved the
+complete removal.
+
+Linux and macOS:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/KoukeNeko/CloakGPT/main/scripts/uninstall.sh
+sh uninstall.sh --yes
+rm uninstall.sh
+```
+
+Windows:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/KoukeNeko/CloakGPT/main/scripts/uninstall.ps1 -OutFile uninstall.ps1
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Yes
+Remove-Item .\uninstall.ps1
+```
+
+The script stops the daemon, uses the Agent Skills CLI when available, removes
+known skill paths as a fallback, and honors the documented CloakGPT directory
+environment overrides. Report any safety refusal or skill-removal warning; do
+not claim a complete uninstall while one remains. Because the current skill is
+deleted during the operation, finish verification from these already-loaded
+instructions and tell the user to restart their agent so its in-memory skill
+list is refreshed.
 
 Do not run `browser clear-cache`, log out, delete the profile, or overwrite
 `CLOAKGPT_DATA_DIR` unless the user explicitly requests that destructive state
