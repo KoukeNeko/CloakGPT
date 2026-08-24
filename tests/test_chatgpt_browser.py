@@ -355,6 +355,61 @@ class ChatGPTBrowserTests(unittest.TestCase):
             timeout=5_000,
         )
 
+    def test_frozen_windows_data_dir_uses_local_app_data(self) -> None:
+        with (
+            patch.object(chatgpt_browser.sys, "frozen", True, create=True),
+            patch.object(chatgpt_browser.platform, "system", return_value="Windows"),
+            patch.dict(
+                chatgpt_browser.os.environ,
+                {"LOCALAPPDATA": r"C:\Users\test\AppData\Local"},
+                clear=True,
+            ),
+        ):
+            data_dir = chatgpt_browser.get_default_data_dir()
+
+        self.assertEqual(
+            data_dir,
+            Path(r"C:\Users\test\AppData\Local\CloakGPT"),
+        )
+
+    def test_frozen_unix_data_dirs_follow_platform_conventions(self) -> None:
+        with (
+            patch.object(chatgpt_browser.sys, "frozen", True, create=True),
+            patch.object(chatgpt_browser.platform, "system", return_value="Linux"),
+            patch.object(Path, "home", return_value=Path("/home/test")),
+            patch.dict(
+                chatgpt_browser.os.environ,
+                {"XDG_DATA_HOME": "/data/test"},
+                clear=True,
+            ),
+        ):
+            linux_dir = chatgpt_browser.get_default_data_dir()
+
+        with (
+            patch.object(chatgpt_browser.sys, "frozen", True, create=True),
+            patch.object(chatgpt_browser.platform, "system", return_value="Darwin"),
+            patch.object(Path, "home", return_value=Path("/Users/test")),
+            patch.dict(chatgpt_browser.os.environ, {}, clear=True),
+        ):
+            macos_dir = chatgpt_browser.get_default_data_dir()
+
+        self.assertEqual(linux_dir, Path("/data/test/CloakGPT"))
+        self.assertEqual(
+            macos_dir,
+            Path("/Users/test/Library/Application Support/CloakGPT"),
+        )
+
+    def test_data_dir_environment_override_always_wins(self) -> None:
+        custom_dir = Path(r"C:\custom-cloakgpt")
+        with patch.dict(
+            chatgpt_browser.os.environ,
+            {"CLOAKGPT_DATA_DIR": str(custom_dir)},
+            clear=True,
+        ):
+            data_dir = chatgpt_browser.get_default_data_dir()
+
+        self.assertEqual(data_dir, custom_dir)
+
 
 if __name__ == "__main__":
     unittest.main()

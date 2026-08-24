@@ -1,6 +1,9 @@
 """Browser automation core for a user-owned ChatGPT session."""
 
+import os
+import platform
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -60,9 +63,40 @@ REASONING_LABELS = {
     ReasoningLevel.HIGH: "高い",
 }
 
-PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_PROFILE_DIR = PROJECT_DIR / "chatgpt-profile"
-DEFAULT_STATE_FILE = PROJECT_DIR / ".chatgpt-conversation-url"
+SOURCE_DIR = Path(__file__).resolve().parent
+
+
+def get_default_data_dir() -> Path:
+    custom_dir = os.environ.get("CLOAKGPT_DATA_DIR")
+    if custom_dir:
+        return Path(custom_dir).expanduser()
+    if not getattr(sys, "frozen", False):
+        return SOURCE_DIR
+
+    system = platform.system()
+    if system == "Windows":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base_dir = (
+            Path(local_app_data)
+            if local_app_data
+            else Path.home() / "AppData" / "Local"
+        )
+        return base_dir / "CloakGPT"
+    if system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "CloakGPT"
+
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    base_dir = (
+        Path(xdg_data_home)
+        if xdg_data_home
+        else Path.home() / ".local" / "share"
+    )
+    return base_dir / "CloakGPT"
+
+
+DEFAULT_DATA_DIR = get_default_data_dir()
+DEFAULT_PROFILE_DIR = DEFAULT_DATA_DIR / "chatgpt-profile"
+DEFAULT_STATE_FILE = DEFAULT_DATA_DIR / ".chatgpt-conversation-url"
 
 StatusCallback = Callable[[str], None]
 
