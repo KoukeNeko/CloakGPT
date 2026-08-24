@@ -6,7 +6,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repository = "KoukeNeko/CloakGPT"
-$asset = "cloakgpt-windows-x86_64.exe"
+$architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+$asset = switch ($architecture) {
+    "X64" { "cloakgpt-windows-x86_64.exe" }
+    "Arm64" { "cloakgpt-windows-arm64.exe" }
+    default { throw "Unsupported Windows architecture: $architecture" }
+}
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = "latest"

@@ -60,6 +60,7 @@ The release workflow produces these native executables:
 | macOS | Intel | `cloakgpt-macos-x86_64` |
 | macOS | Apple Silicon | `cloakgpt-macos-arm64` |
 | Windows | x86-64 | `cloakgpt-windows-x86_64.exe` |
+| Windows | ARM64 | `cloakgpt-windows-arm64.exe` |
 
 The macOS executables are signed with a Developer ID Application certificate
 and notarized by Apple. The Windows executable is not currently code-signed, so
@@ -251,7 +252,7 @@ the GitHub Actions matrix uses a native runner for each supported target.
 
 `.github/workflows/ci.yml` runs tests on Linux, macOS, and Windows for every
 push and pull request. `.github/workflows/release.yml` can be run manually to
-produce downloadable workflow artifacts. Pushing a version tag builds all five
+produce downloadable workflow artifacts. Pushing a version tag builds all six
 executables, generates checksum files, and publishes a GitHub release:
 
 ```sh
