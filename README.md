@@ -48,32 +48,7 @@ The default destination is `%LOCALAPPDATA%\Programs\CloakGPT\cloakgpt.exe`.
 The installer adds that directory to the user `PATH`; open a new terminal after
 installation.
 
-Install a specific release or choose another directory:
-
-```sh
-CLOAKGPT_VERSION=v1.0.0 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
-```
-
-```powershell
-.\install.ps1 -Version v1.0.0 -InstallDir D:\Tools\CloakGPT
-```
-
-The release workflow produces these native executables:
-
-| Platform | Architecture | Release asset |
-| --- | --- | --- |
-| Linux | x86-64 | `cloakgpt-linux-x86_64` |
-| Linux | ARM64 | `cloakgpt-linux-arm64` |
-| macOS | Intel | `cloakgpt-macos-x86_64` |
-| macOS | Apple Silicon | `cloakgpt-macos-arm64` |
-| Windows | x86-64 | `cloakgpt-windows-x86_64.exe` |
-| Windows | ARM64 | `cloakgpt-windows-arm64.exe` |
-
-The macOS executables are signed with a Developer ID Application certificate
-and notarized by Apple. The Windows executable is not currently code-signed, so
-Windows may display a warning when it is opened for the first time.
-
-## Install the agent skill (optional)
+## Install the agent skill (recommended)
 
 `skills/use-cloakgpt` follows the portable
 [Agent Skills specification](https://openagentskills.dev/docs/specification),
@@ -103,7 +78,34 @@ Do not treat a successful installer exit code as proof that the current agent
 can discover the skill. Check the native destination and reload or restart the
 agent when required.
 
-### Instructions for an agent
+## Release options and assets
+
+Install a specific release or choose another directory:
+
+```sh
+CLOAKGPT_VERSION=v1.0.0 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
+```
+
+```powershell
+.\install.ps1 -Version v1.0.0 -InstallDir D:\Tools\CloakGPT
+```
+
+The release workflow produces these native executables:
+
+| Platform | Architecture | Release asset |
+| --- | --- | --- |
+| Linux | x86-64 | `cloakgpt-linux-x86_64` |
+| Linux | ARM64 | `cloakgpt-linux-arm64` |
+| macOS | Intel | `cloakgpt-macos-x86_64` |
+| macOS | Apple Silicon | `cloakgpt-macos-arm64` |
+| Windows | x86-64 | `cloakgpt-windows-x86_64.exe` |
+| Windows | ARM64 | `cloakgpt-windows-arm64.exe` |
+
+The macOS executables are signed with a Developer ID Application certificate
+and notarized by Apple. The Windows executable is not currently code-signed, so
+Windows may display a warning when it is opened for the first time.
+
+## Instructions for an agent
 
 Paste the following complete task into the coding agent that should use
 CloakGPT. It includes installation, fallback, and verification instead of
