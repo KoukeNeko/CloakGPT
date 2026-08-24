@@ -306,6 +306,11 @@ The default user timezone is `Asia/Taipei`. Override it with an IANA timezone:
 cloakgpt login --timezone America/New_York
 ```
 
+If a packaged macOS build reports `Failed to reserve virtual memory for
+CodeRange`, its bundled Playwright Node driver was signed without the V8 JIT
+entitlements. Installing CloakBrowser again will not repair that executable;
+upgrade CloakGPT to a current release. Do not disable Gatekeeper as a workaround.
+
 ## Manage the external browser
 
 The CloakBrowser Python wrapper and Playwright driver are included in the
@@ -546,6 +551,13 @@ SHA-1 identity to PyInstaller so embedded one-file binaries are signed, submits
 the signed executable to Apple's notary service, and removes all temporary
 signing material before the job ends. Secret values must never be committed to
 the repository.
+
+The bundled Playwright Node driver uses V8 JIT compilation. PyInstaller applies
+the minimal exceptions in `macos-entitlements.plist` while signing the collected
+executables: `com.apple.security.cs.allow-jit` and
+`com.apple.security.cs.allow-unsigned-executable-memory`. Each release job
+starts the packaged Playwright driver after signing, verifies both entitlements,
+and only then submits the macOS executable for notarization.
 
 ## License
 
