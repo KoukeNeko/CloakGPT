@@ -78,16 +78,18 @@ cloakgpt ask "What is the weather today?" --timezone Asia/Taipei
 
 Use the least invasive recovery step:
 
-1. If the browser binary is missing, run `cloakgpt browser install`.
-2. If installation still fails, inspect with `cloakgpt browser info --quick` or
+1. If the `cloakgpt` command is missing, tell the user to install CloakGPT from
+   its official repository. Do not download an executable from another source.
+2. If the browser binary is missing, run `cloakgpt browser install`.
+3. If installation still fails, inspect with `cloakgpt browser info --quick` or
    `cloakgpt browser doctor`, then report the diagnostic and any named
    environment variable. Do not guess credentials or license values.
-3. If ChatGPT requires authentication, ask the user to complete
+4. If ChatGPT requires authentication, ask the user to complete
    `cloakgpt login` in its visible browser window. A running daemon owns the same
    profile, so obtain permission to stop it first; stopping preserves session
    IDs and conversation URLs. Never enter, request, or expose their ChatGPT
    password, cookies, or session tokens.
-4. For a headless page-state failure, retry once with `--headed` only when a
+5. For a headless page-state failure, retry once with `--headed` only when a
    visible diagnostic run is acceptable. Persistent sessions require stopping
    the daemon before changing browser mode; do not stop it without permission.
 

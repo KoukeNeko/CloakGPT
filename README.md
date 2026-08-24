@@ -73,19 +73,57 @@ The macOS executables are signed with a Developer ID Application certificate
 and notarized by Apple. The Windows executable is not currently code-signed, so
 Windows may display a warning when it is opened for the first time.
 
-## Install the Codex skill (optional)
+## Install the agent skill (optional)
 
-After installing CloakGPT, open a Codex task and send:
+`skills/use-cloakgpt` follows the portable
+[Agent Skills specification](https://openagentskills.dev/docs/specification),
+so the same `SKILL.md` works with Claude Code, Codex, Gemini CLI, and other
+compatible coding agents. Review the skill before installing it; an agent will
+follow its instructions with the permissions available to that agent.
 
-```text
-$skill-installer install the skill from:
-https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt
+If you do not know which agent-specific directory to use, let a universal
+installer detect or ask for the target. With a recent GitHub CLI:
+
+```sh
+gh skill install KoukeNeko/CloakGPT skills/use-cloakgpt --scope user
 ```
 
-Codex installs the skill as `use-cloakgpt` under `$CODEX_HOME/skills` (normally
-`~/.codex/skills`) and makes it available on the next turn. The skill teaches an
-agent when and how to use the local CloakGPT CLI; it does not install the
-CloakGPT executable or browser binary itself.
+Alternatively, with Node.js installed:
+
+```sh
+npx skills add https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt -g
+```
+
+Both commands install at user scope and prompt for missing host information in
+an interactive terminal. For a non-interactive installation, pass the current
+agent explicitly: `claude-code`, `codex`, or `gemini-cli`.
+
+### Instructions for an agent
+
+Paste the following into the coding agent that should use CloakGPT:
+
+```text
+Install the portable Agent Skill from
+https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt
+for your own agent runtime at user scope. Review SKILL.md first. Detect your
+actual host instead of assuming Codex. Prefer:
+
+gh skill install KoukeNeko/CloakGPT skills/use-cloakgpt \
+  --agent <your-agent-slug> --scope user
+
+If `gh skill install` is unavailable, use:
+
+npx skills add \
+  https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt \
+  -g -a <your-agent-slug> -y
+
+Use claude-code for Claude Code, codex for Codex, or gemini-cli for Gemini CLI.
+Verify that use-cloakgpt was installed, then tell me whether your host needs a
+new turn or restart before it can discover the skill.
+```
+
+The skill teaches an agent how to use an already installed local CloakGPT CLI.
+It does not install the CloakGPT executable or external browser binary.
 
 ## Uninstall
 
