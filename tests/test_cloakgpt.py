@@ -7,6 +7,29 @@ import cloakgpt
 
 
 class CloakGPTCliTests(unittest.TestCase):
+    def test_windows_stdio_uses_utf8(self) -> None:
+        stdin = Mock()
+        stdout = Mock()
+        stderr = Mock()
+
+        with (
+            patch.object(cloakgpt.os, "name", "nt"),
+            patch.object(cloakgpt.sys, "stdin", stdin),
+            patch.object(cloakgpt.sys, "stdout", stdout),
+            patch.object(cloakgpt.sys, "stderr", stderr),
+            patch.object(cloakgpt.ctypes, "WinDLL", create=True) as win_dll,
+        ):
+            cloakgpt._configure_windows_utf8_stdio()
+
+        win_dll.assert_called_once_with("kernel32", use_last_error=True)
+        win_dll.return_value.SetConsoleCP.assert_called_once_with(65001)
+        win_dll.return_value.SetConsoleOutputCP.assert_called_once_with(65001)
+        for stream in (stdin, stdout, stderr):
+            stream.reconfigure.assert_called_once_with(
+                encoding="utf-8",
+                errors="strict",
+            )
+
     @patch("cloakgpt.subprocess.run")
     @patch("cloakgpt.compute_driver_executable", return_value=("node", "cli.js"))
     def test_hidden_playwright_check_starts_driver(

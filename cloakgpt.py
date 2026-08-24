@@ -1,6 +1,7 @@
 """Command-line interface for CloakGPT."""
 
 import argparse
+import ctypes
 import json
 import os
 import subprocess
@@ -25,6 +26,27 @@ EXISTING_BROWSER_SESSION_MARKERS = (
     "Opening in existing browser session",
     "既存のブラウザ セッションで開いています",
 )
+
+
+def _configure_windows_utf8_stdio() -> None:
+    """Use UTF-8 for the Windows console and Python standard streams."""
+    if os.name != "nt":
+        return
+
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetConsoleCP(65001)
+        kernel32.SetConsoleOutputCP(65001)
+    except (AttributeError, OSError):
+        pass
+
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="strict")
+            except (OSError, ValueError):
+                pass
 
 
 def _profile_already_open(error: Exception) -> bool:
@@ -287,6 +309,7 @@ def _run_daemon_control(command: str) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_windows_utf8_stdio()
     arguments = list(argv) if argv is not None else sys.argv[1:]
     if arguments[:1] == ["browser"]:
         return run_browser_command(arguments[1:])

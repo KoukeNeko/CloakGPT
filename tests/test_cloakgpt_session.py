@@ -47,6 +47,32 @@ class SessionBrokerTests(unittest.TestCase):
         self.assertTrue(cloakgpt_session._pid_is_alive(os.getpid()))
         self.assertFalse(cloakgpt_session._pid_is_alive(-1))
 
+    def test_windows_broker_is_hidden_and_uses_utf8(self) -> None:
+        log = Mock()
+        with (
+            patch.object(cloakgpt_session.os, "name", "nt"),
+            patch.object(
+                cloakgpt_session.subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0x00000200,
+                create=True,
+            ),
+            patch.object(
+                cloakgpt_session.subprocess,
+                "CREATE_NO_WINDOW",
+                0x08000000,
+                create=True,
+            ),
+        ):
+            options = cloakgpt_session._broker_process_options(log)
+
+        self.assertEqual(options["creationflags"], 0x08000200)
+        self.assertNotIn("start_new_session", options)
+        self.assertEqual(options["env"]["PYTHONUTF8"], "1")
+        self.assertEqual(options["env"]["PYTHONIOENCODING"], "utf-8")
+        self.assertIs(options["stdout"], log)
+        self.assertIs(options["stderr"], log)
+
     @patch("cloakgpt_session.send_message_on_page")
     def test_reuses_one_context_and_page_for_multiple_messages(self, send) -> None:
         opened = self.open_session()

@@ -447,6 +447,28 @@ def _saved_broker_options(data_dir: Path) -> tuple[bool, str]:
     return bool(state.get("headless", True)), str(state.get("timezone", "Asia/Taipei"))
 
 
+def _broker_process_options(log) -> dict[str, Any]:
+    environment = os.environ.copy()
+    environment["PYTHONUTF8"] = "1"
+    environment["PYTHONIOENCODING"] = "utf-8"
+    if getattr(sys, "frozen", False):
+        environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+
+    options: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": log,
+        "stderr": log,
+        "env": environment,
+    }
+    if os.name == "nt":
+        options["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        )
+    else:
+        options["start_new_session"] = True
+    return options
+
+
 def ensure_broker(
     *,
     data_dir: Path = DEFAULT_DATA_DIR,
@@ -488,24 +510,9 @@ def ensure_broker(
         _remove_file(_metadata_path(data_dir))
         log_path = data_dir / LOG_NAME
         with log_path.open("ab") as log:
-            options: dict[str, Any] = {
-                "stdin": subprocess.DEVNULL,
-                "stdout": log,
-                "stderr": log,
-            }
-            if getattr(sys, "frozen", False):
-                environment = os.environ.copy()
-                environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-                options["env"] = environment
-            if os.name == "nt":
-                options["creationflags"] = (
-                    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-                )
-            else:
-                options["start_new_session"] = True
             process = subprocess.Popen(
                 _broker_command(selected_headless, selected_timezone),
-                **options,
+                **_broker_process_options(log),
             )
 
         while time.monotonic() < deadline:
