@@ -369,7 +369,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
 
         self.assertEqual(
             data_dir,
-            Path(r"C:\Users\test\AppData\Local\CloakGPT"),
+            Path(r"C:\Users\test\AppData\Local") / "CloakGPT",
         )
 
     def test_frozen_unix_data_dirs_follow_platform_conventions(self) -> None:
