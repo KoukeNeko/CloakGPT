@@ -56,8 +56,9 @@ The release workflow produces these native executables:
 | macOS | Apple Silicon | `cloakgpt-macos-arm64` |
 | Windows | x86-64 | `cloakgpt-windows-x86_64.exe` |
 
-The CI-produced executables are not currently code-signed or notarized, so the
-operating system may display a warning when they are opened for the first time.
+The macOS executables are signed with a Developer ID Application certificate
+and notarized by Apple. The Windows executable is not currently code-signed, so
+Windows may display a warning when it is opened for the first time.
 
 ## Uninstall
 
@@ -222,6 +223,24 @@ executables, generates checksum files, and publishes a GitHub release:
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+### macOS release signing
+
+The two macOS jobs require these GitHub Actions repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12_BASE64` | Base64-encoded Developer ID Application `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | Password used when exporting the `.p12` |
+| `APPLE_API_KEY_P8_BASE64` | Base64-encoded App Store Connect API key |
+| `APPLE_API_KEY_ID` | App Store Connect API key ID |
+| `APPLE_API_ISSUER_ID` | App Store Connect API issuer ID |
+
+The workflow imports the certificate into a temporary keychain, passes its
+SHA-1 identity to PyInstaller so embedded one-file binaries are signed, submits
+the signed executable to Apple's notary service, and removes all temporary
+signing material before the job ends. Secret values must never be committed to
+the repository.
 
 Use the automation only with an account and websites you are authorized to
 access, and follow the applicable service terms.
