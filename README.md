@@ -320,6 +320,10 @@ The default user timezone is `Asia/Taipei`. Override it with an IANA timezone:
 cloakgpt login --timezone America/New_York
 ```
 
+Only one process can own the persistent browser profile. If `login` reports
+that the profile is already open, close the existing CloakGPT Chromium window.
+If a persistent session owns it, run `cloakgpt daemon stop`, then retry login.
+
 If a packaged macOS build reports `Failed to reserve virtual memory for
 CodeRange`, its bundled Playwright Node driver was signed without the V8 JIT
 entitlements. Installing CloakBrowser again will not repair that executable;
