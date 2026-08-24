@@ -8,6 +8,26 @@ select an available model and reasoning level, report ChatGPT's live page
 status, and return the final response with Markdown formatting and citation
 sources.
 
+## Table of contents
+
+- [Install a release](#install-a-release)
+  - [Linux and macOS](#linux-and-macos)
+  - [Windows](#windows)
+- [Install the agent skill (recommended)](#install-the-agent-skill-recommended)
+- [Release options and assets](#release-options-and-assets)
+- [Instructions for an agent](#instructions-for-an-agent)
+- [Uninstall](#uninstall)
+- [Login](#login)
+- [Manage the external browser](#manage-the-external-browser)
+- [Ask ChatGPT](#ask-chatgpt)
+- [Persistent agent sessions](#persistent-agent-sessions)
+- [Select a model and reasoning level](#select-a-model-and-reasoning-level)
+- [User data](#user-data)
+- [Run from source](#run-from-source)
+- [Test and build](#test-and-build)
+  - [macOS release signing](#macos-release-signing)
+- [License](#license)
+
 ## Install a release
 
 The installers download the executable for the current platform, verify its
@@ -111,6 +131,9 @@ Paste the following complete task into the coding agent that should use
 CloakGPT. It includes installation, fallback, and verification instead of
 assuming that one command succeeded:
 
+<details>
+<summary>Show the complete installation prompt</summary>
+
 ```text
 Install and fully set up CloakGPT and its `use-cloakgpt` Agent Skill on this
 machine. Use only the official repository and releases at
@@ -209,6 +232,8 @@ Follow this procedure:
    access, filesystem permissions, or a missing tool blocks completion, state
    the exact remaining action and do not describe setup as complete.
 ```
+
+</details>
 
 The prompt installs the application, external browser, and skill. The skill
 itself teaches an agent how to operate the installed CloakGPT CLI.
@@ -490,6 +515,11 @@ SHA-1 identity to PyInstaller so embedded one-file binaries are signed, submits
 the signed executable to Apple's notary service, and removes all temporary
 signing material before the job ends. Secret values must never be committed to
 the repository.
+
+## License
+
+CloakGPT is available under the [MIT License](LICENSE). Third-party components
+and dependencies retain their respective licenses.
 
 Use the automation only with an account and websites you are authorized to
 access, and follow the applicable service terms.
