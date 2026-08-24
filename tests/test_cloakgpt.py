@@ -51,9 +51,9 @@ class CloakGPTCliTests(unittest.TestCase):
         start_conversation.assert_called_once_with(
             "Hello",
             timezone="Asia/Taipei",
-            timeout_seconds=120,
             model=cloakgpt.ChatGPTModel.GPT_5_5,
             reasoning_level=cloakgpt.ReasoningLevel.HIGH,
+            status_callback=cloakgpt.show_status,
         )
 
     @patch("cloakgpt.continue_conversation", return_value="Next answer")
@@ -67,9 +67,28 @@ class CloakGPTCliTests(unittest.TestCase):
         continue_conversation.assert_called_once_with(
             "More details",
             timezone="Asia/Taipei",
-            timeout_seconds=120,
             model=None,
             reasoning_level=None,
+            status_callback=cloakgpt.show_status,
+        )
+
+    @patch("cloakgpt.start_conversation")
+    def test_status_is_printed_to_stderr_only(self, start_conversation) -> None:
+        def run(_question, **options):
+            options["status_callback"]("Waiting for ChatGPT response...")
+            return "Answer"
+
+        start_conversation.side_effect = run
+        output = io.StringIO()
+        errors = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            result = cloakgpt.main(["ask", "Hello"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(output.getvalue().strip(), "Answer")
+        self.assertEqual(
+            errors.getvalue().strip(),
+            "[status] Waiting for ChatGPT response...",
         )
 
     @patch("cloakgpt.start_conversation", side_effect=ValueError("not available"))
@@ -80,6 +99,15 @@ class CloakGPTCliTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertEqual(errors.getvalue().strip(), "error: not available")
+
+    @patch("cloakgpt.start_conversation", side_effect=KeyboardInterrupt)
+    def test_ctrl_c_stops_without_traceback(self, _start_conversation) -> None:
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            result = cloakgpt.main(["ask", "Hello"])
+
+        self.assertEqual(result, 130)
+        self.assertEqual(errors.getvalue().strip(), "stopped")
 
 
 if __name__ == "__main__":

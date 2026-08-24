@@ -20,6 +20,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.advanced_view = Mock()
         self.advanced_view.count.return_value = 1
         self.model_item = Mock()
+        self.model_item.inner_text.return_value = "模型 GPT-5.6 Sol"
         self.reasoning_item = Mock()
         self.submenu_items = Mock()
         self.submenu_items.count.return_value = 2
@@ -48,6 +49,8 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.responses = Mock()
         self.responses.count.return_value = 0
         self.responses.last.inner_text.return_value = "OK."
+        self.copy_actions = Mock()
+        self.copy_actions.count.return_value = 0
 
         self.page = Mock()
         self.page.url = "https://chatgpt.com/c/test-conversation"
@@ -55,13 +58,16 @@ class ChatGPTBrowserTests(unittest.TestCase):
             chatgpt_browser.PROMPT_EDITOR_SELECTOR: self.editor,
             chatgpt_browser.SEND_BUTTON_SELECTOR: self.send_button,
             chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: self.responses,
+            chatgpt_browser.COPY_ACTION_SELECTOR: self.copy_actions,
             chatgpt_browser.REASONING_TRIGGER_SELECTOR: self.reasoning_trigger,
         }
-        visible_menus = [self.root_menu, self.reasoning_menu]
+        visible_menus = Mock()
+        visible_menus.first = self.root_menu
+        visible_menus.last = self.reasoning_menu
 
         def locate(selector):
             if selector == '[role="menu"]:visible':
-                return visible_menus.pop(0)
+                return visible_menus
             return locator_results.get(selector)
 
         self.page.locator.side_effect = locate
@@ -104,7 +110,8 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.editor.fill.assert_any_call("First")
         self.editor.fill.assert_any_call("Second")
         self.assertEqual(self.send_button.click.call_count, 2)
-        self.reasoning_trigger.click.assert_not_called()
+        self.model_option.click.assert_not_called()
+        self.reasoning_option.click.assert_not_called()
 
     def test_selects_requested_model(self) -> None:
         chatgpt_browser.start_conversation(
@@ -126,7 +133,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             state_file=self.state_file,
         )
 
-        self.reasoning_trigger.click.assert_called_once_with()
+        self.assertEqual(self.reasoning_trigger.click.call_count, 2)
         self.advanced_view.click.assert_called_once_with()
         self.reasoning_item.click.assert_called_once_with()
         self.reasoning_options.nth.assert_called_once_with(2)
@@ -155,8 +162,31 @@ class ChatGPTBrowserTests(unittest.TestCase):
         )
 
         self.reasoning_option.click.assert_not_called()
-        self.assertEqual(self.page.keyboard.press.call_count, 2)
+        self.assertGreaterEqual(self.page.keyboard.press.call_count, 2)
         self.page.keyboard.press.assert_called_with("Escape")
+
+    def test_reports_page_and_response_status_without_response_timeout(self) -> None:
+        status_callback = Mock()
+
+        chatgpt_browser.start_conversation(
+            "Hello",
+            status_callback=status_callback,
+            profile_dir=self.profile_dir,
+            state_file=self.state_file,
+        )
+
+        status_callback.assert_any_call("Opening ChatGPT...")
+        status_callback.assert_any_call(
+            "Current page: model=GPT-5.6 Sol, reasoning=high, "
+            "url=https://chatgpt.com/c/test-conversation"
+        )
+        status_callback.assert_any_call(
+            "Waiting for ChatGPT response (Ctrl+C to stop)..."
+        )
+        status_callback.assert_any_call("ChatGPT is responding...")
+        status_callback.assert_any_call("Response complete.")
+        for call in self.page.wait_for_function.call_args_list:
+            self.assertEqual(call.kwargs["timeout"], 0)
 
     def test_rejects_invalid_saved_url(self) -> None:
         self.state_file.write_text("https://example.com/c/test", encoding="utf-8")

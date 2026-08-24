@@ -40,12 +40,6 @@ def _add_shared_options(parser: argparse.ArgumentParser) -> None:
         help="user's IANA timezone (default: Asia/Taipei)",
     )
     parser.add_argument(
-        "--timeout",
-        type=int,
-        default=120,
-        help="maximum wait in seconds (default: 120)",
-    )
-    parser.add_argument(
         "--model",
         type=ChatGPTModel,
         choices=list(ChatGPTModel),
@@ -57,6 +51,11 @@ def _add_shared_options(parser: argparse.ArgumentParser) -> None:
         choices=list(ReasoningLevel),
         help="reasoning level; omit to keep ChatGPT's current setting",
     )
+
+
+def show_status(message: str) -> None:
+    """Print browser progress without mixing it with the response text."""
+    print(f"[status] {message}", file=sys.stderr, flush=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -100,10 +99,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         answer = operation(
             args.question,
             timezone=args.timezone,
-            timeout_seconds=args.timeout,
             model=args.model,
             reasoning_level=args.reasoning,
+            status_callback=show_status,
         )
+    except KeyboardInterrupt:
+        print("stopped", file=sys.stderr)
+        return 130
     except Exception as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

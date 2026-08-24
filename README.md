@@ -40,7 +40,23 @@ The default user timezone is `Asia/Taipei`. Override it with an IANA timezone:
 ```
 
 The command opens a visible browser, sends the message, waits for the response
-to finish, prints the response text, and saves the conversation URL.
+to finish, prints the response text, and saves the conversation URL. It waits
+without a response deadline because generation time depends on the model and
+prompt; press Ctrl+C to stop it manually.
+
+Browser progress and the current ChatGPT page settings are printed to stderr:
+
+```text
+[status] Opening ChatGPT...
+[status] Current page: model=GPT-5.6 Sol, reasoning=high, url=https://chatgpt.com/
+[status] Sending message...
+[status] Waiting for ChatGPT response (Ctrl+C to stop)...
+[status] ChatGPT is responding...
+[status] Response complete.
+```
+
+Only the final response is printed to stdout, so it can be redirected or piped
+without including status lines.
 
 ## Continue the conversation
 
@@ -76,16 +92,16 @@ options currently exposed by the advanced composer menu:
 | `high` | 高い |
 
 Both options default to `None`. Omit `--model` to keep the current model, and
-omit `--reasoning` to keep the current reasoning level; the corresponding menu
-is not opened or changed. Availability depends on the signed-in account's plan
-and workspace settings. If a requested value is unavailable, the CLI reports
-the visible menu instead of changing a private ChatGPT API.
+omit `--reasoning` to keep the current reasoning level. The CLI reads the
+current settings for its status output but does not select a different option.
+Availability depends on the signed-in account's plan and workspace settings.
+If a requested value is unavailable, the CLI reports the visible menu instead
+of changing a private ChatGPT API.
 
 Other options:
 
 ```text
 --timezone IANA_NAME   User's timezone; default: Asia/Taipei
---timeout SECONDS      Maximum UI/response wait; default: 120
 ```
 
 ## Tests

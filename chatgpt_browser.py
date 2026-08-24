@@ -1,8 +1,9 @@
 """Browser automation core for a user-owned ChatGPT session."""
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from time import monotonic
 from urllib.parse import urlparse
 
 from cloakbrowser import launch_persistent_context
@@ -12,6 +13,7 @@ CHATGPT_URL = "https://chatgpt.com/"
 PROMPT_EDITOR_SELECTOR = "#prompt-textarea"
 SEND_BUTTON_SELECTOR = '[data-testid="send-button"]'
 ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]'
+COPY_ACTION_SELECTOR = '[data-testid="copy-turn-action-button"]'
 REASONING_TRIGGER_SELECTOR = (
     'form button[aria-haspopup="menu"]:not(#composer-plus-btn)'
 )
@@ -49,9 +51,24 @@ REASONING_LEVEL_INDEXES = {
     ReasoningLevel.HIGH: 2,
 }
 
+REASONING_LABELS = {
+    ReasoningLevel.FAST: "最速",
+    ReasoningLevel.MEDIUM: "中程度",
+    ReasoningLevel.HIGH: "高い",
+}
+
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_PROFILE_DIR = PROJECT_DIR / "chatgpt-profile"
 DEFAULT_STATE_FILE = PROJECT_DIR / ".chatgpt-conversation-url"
+
+StatusCallback = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class ChatGPTPageStatus:
+    url: str
+    model: str
+    reasoning: str
 
 
 def _validate_question(question: str) -> None:
@@ -69,32 +86,33 @@ def _validate_conversation_url(url: str) -> None:
         raise ValueError("invalid ChatGPT conversation URL")
 
 
-def _wait_for_reply(page, previous_count: int, timeout_seconds: int) -> str:
+def _emit_status(callback: StatusCallback | None, message: str) -> None:
+    if callback is not None:
+        callback(message)
+
+
+def _wait_for_reply(
+    page,
+    previous_count: int,
+    previous_copy_count: int,
+    status_callback: StatusCallback | None,
+) -> str:
     page.wait_for_function(
         """previousCount =>
         document.querySelectorAll('[data-message-author-role="assistant"]').length
         > previousCount""",
         arg=previous_count,
-        timeout=timeout_seconds * 1_000,
+        timeout=0,
     )
-
-    response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
-    deadline = monotonic() + timeout_seconds
-    previous_text = ""
-    unchanged_checks = 0
-
-    while monotonic() < deadline:
-        current_text = response.inner_text().strip()
-        if current_text and current_text == previous_text:
-            unchanged_checks += 1
-            if unchanged_checks == 3:
-                return current_text
-        else:
-            unchanged_checks = 0
-        previous_text = current_text
-        page.wait_for_timeout(1_000)
-
-    raise TimeoutError("ChatGPT did not finish responding before the timeout")
+    _emit_status(status_callback, "ChatGPT is responding...")
+    page.wait_for_function(
+        """previousCount =>
+        document.querySelectorAll('[data-testid="copy-turn-action-button"]').length
+        > previousCount""",
+        arg=previous_copy_count,
+        timeout=0,
+    )
+    return page.locator(ASSISTANT_MESSAGE_SELECTOR).last.inner_text().strip()
 
 
 def _open_advanced_submenu(page, submenu_index: int, menu_name: str):
@@ -121,6 +139,37 @@ def _open_advanced_submenu(page, submenu_index: int, menu_name: str):
 def _close_advanced_menus(page) -> None:
     page.keyboard.press("Escape")
     page.keyboard.press("Escape")
+
+
+def _read_page_status(page) -> ChatGPTPageStatus:
+    trigger = page.locator(REASONING_TRIGGER_SELECTOR)
+    trigger.wait_for(state="visible", timeout=10_000)
+    reasoning_text = trigger.inner_text().strip()
+    reasoning = next(
+        (
+            level.value
+            for level, label in REASONING_LABELS.items()
+            if label in reasoning_text
+        ),
+        reasoning_text,
+    )
+    trigger.click()
+    try:
+        root_menu = page.locator('[role="menu"]:visible').first
+        root_menu.wait_for(state="visible", timeout=10_000)
+        submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
+        if submenu_items.count() < 2:
+            available = " ".join(root_menu.inner_text().split())
+            raise ValueError(f"ChatGPT status is unavailable; menu: {available}")
+
+        model_text = " ".join(submenu_items.nth(0).inner_text().split())
+        model = next(
+            (label for label in MODEL_LABELS.values() if label in model_text),
+            model_text,
+        )
+        return ChatGPTPageStatus(page.url, model, reasoning)
+    finally:
+        page.keyboard.press("Escape")
 
 
 def _set_model(page, model: ChatGPTModel) -> None:
@@ -156,28 +205,25 @@ def _set_reasoning_level(page, reasoning_level: ReasoningLevel) -> None:
         return
 
     option.click()
-    deadline = monotonic() + 5
-    while monotonic() < deadline:
+    for _ in range(50):
         if trigger.inner_text().strip() == selected_label:
             return
         page.wait_for_timeout(100)
-    else:
-        raise RuntimeError("ChatGPT did not apply the selected reasoning level")
+    raise RuntimeError("ChatGPT did not apply the selected reasoning level")
 
 
 def _send_message(
     url: str,
     question: str,
     timezone: str,
-    timeout_seconds: int,
     profile_dir: Path,
     model: ChatGPTModel | None,
     reasoning_level: ReasoningLevel | None,
+    status_callback: StatusCallback | None,
 ) -> tuple[str, str]:
     _validate_question(question)
-    if timeout_seconds <= 0:
-        raise ValueError("timeout_seconds must be positive")
 
+    _emit_status(status_callback, "Opening ChatGPT...")
     context = launch_persistent_context(
         str(profile_dir),
         headless=False,
@@ -189,20 +235,37 @@ def _send_message(
         page.goto(url, wait_until="domcontentloaded")
 
         if model is not None:
+            _emit_status(status_callback, f"Selecting model: {model}")
             _set_model(page, model)
         if reasoning_level is not None:
+            _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
             _set_reasoning_level(page, reasoning_level)
 
+        status = _read_page_status(page)
+        _emit_status(
+            status_callback,
+            f"Current page: model={status.model}, reasoning={status.reasoning}, url={status.url}",
+        )
+
         editor = page.locator(PROMPT_EDITOR_SELECTOR)
-        editor.wait_for(state="visible", timeout=timeout_seconds * 1_000)
+        editor.wait_for(state="visible", timeout=30_000)
         previous_count = page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
+        previous_copy_count = page.locator(COPY_ACTION_SELECTOR).count()
         editor.fill(question)
 
         send_button = page.locator(SEND_BUTTON_SELECTOR)
         send_button.wait_for(state="visible", timeout=10_000)
+        _emit_status(status_callback, "Sending message...")
         send_button.click()
 
-        answer = _wait_for_reply(page, previous_count, timeout_seconds)
+        _emit_status(status_callback, "Waiting for ChatGPT response (Ctrl+C to stop)...")
+        answer = _wait_for_reply(
+            page,
+            previous_count,
+            previous_copy_count,
+            status_callback,
+        )
+        _emit_status(status_callback, "Response complete.")
         return answer, page.url
     finally:
         context.close()
@@ -212,9 +275,9 @@ def start_conversation(
     question: str,
     *,
     timezone: str = "Asia/Taipei",
-    timeout_seconds: int = 120,
     model: ChatGPTModel | None = None,
     reasoning_level: ReasoningLevel | None = None,
+    status_callback: StatusCallback | None = None,
     profile_dir: Path = DEFAULT_PROFILE_DIR,
     state_file: Path = DEFAULT_STATE_FILE,
 ) -> str:
@@ -223,10 +286,10 @@ def start_conversation(
         CHATGPT_URL,
         question,
         timezone,
-        timeout_seconds,
         profile_dir,
         model,
         reasoning_level,
+        status_callback,
     )
     _validate_conversation_url(conversation_url)
     state_file.write_text(conversation_url, encoding="utf-8")
@@ -237,9 +300,9 @@ def continue_conversation(
     question: str,
     *,
     timezone: str = "Asia/Taipei",
-    timeout_seconds: int = 120,
     model: ChatGPTModel | None = None,
     reasoning_level: ReasoningLevel | None = None,
+    status_callback: StatusCallback | None = None,
     profile_dir: Path = DEFAULT_PROFILE_DIR,
     state_file: Path = DEFAULT_STATE_FILE,
 ) -> str:
@@ -253,10 +316,10 @@ def continue_conversation(
         conversation_url,
         question,
         timezone,
-        timeout_seconds,
         profile_dir,
         model,
         reasoning_level,
+        status_callback,
     )
     _validate_conversation_url(current_url)
     state_file.write_text(current_url, encoding="utf-8")
