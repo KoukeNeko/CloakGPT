@@ -7,6 +7,32 @@ import cloakgpt
 
 
 class CloakGPTCliTests(unittest.TestCase):
+    @patch("cloakgpt.cloakbrowser_main")
+    def test_browser_command_delegates_to_cloakbrowser_cli(
+        self,
+        cloakbrowser_main,
+    ) -> None:
+        delegated_argv = []
+        cloakbrowser_main.side_effect = lambda: delegated_argv.extend(cloakgpt.sys.argv)
+
+        with patch.object(cloakgpt.sys, "argv", ["original-command"]):
+            result = cloakgpt.main(["browser", "info", "--quick"])
+
+            self.assertEqual(cloakgpt.sys.argv, ["original-command"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(delegated_argv, ["cloakbrowser", "info", "--quick"])
+        cloakbrowser_main.assert_called_once_with()
+
+    @patch("cloakgpt.cloakbrowser_main", side_effect=SystemExit(2))
+    def test_browser_command_returns_cloakbrowser_exit_code(
+        self,
+        _cloakbrowser_main,
+    ) -> None:
+        result = cloakgpt.main(["browser"])
+
+        self.assertEqual(result, 2)
+
     @patch("builtins.input", return_value="")
     @patch("cloakgpt.launch_persistent_context")
     def test_login_command(self, launch_persistent_context, user_input) -> None:

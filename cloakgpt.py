@@ -5,6 +5,7 @@ import sys
 from collections.abc import Sequence
 
 from cloakbrowser import launch_persistent_context
+from cloakbrowser.__main__ import main as cloakbrowser_main
 
 from chatgpt_browser import (
     CHATGPT_URL,
@@ -58,6 +59,24 @@ def show_status(message: str) -> None:
     print(f"[status] {message}", file=sys.stderr, flush=True)
 
 
+def run_browser_command(arguments: Sequence[str]) -> int:
+    """Delegate browser management to CloakBrowser's official CLI."""
+    original_argv = sys.argv
+    sys.argv = ["cloakbrowser", *arguments]
+    try:
+        cloakbrowser_main()
+    except SystemExit as error:
+        if error.code is None:
+            return 0
+        if isinstance(error.code, int):
+            return error.code
+        print(error.code, file=sys.stderr)
+        return 1
+    finally:
+        sys.argv = original_argv
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Send messages through a user-owned ChatGPT browser session."
@@ -74,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="user's IANA timezone (default: Asia/Taipei)",
     )
 
+    commands.add_parser(
+        "browser",
+        add_help=False,
+        help="install, inspect, update, or clear the CloakBrowser binary",
+    )
+
     ask_parser = commands.add_parser("ask", help="start a new conversation")
     _add_shared_options(ask_parser)
 
@@ -86,7 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    arguments = list(argv) if argv is not None else sys.argv[1:]
+    if arguments[:1] == ["browser"]:
+        return run_browser_command(arguments[1:])
+
+    args = build_parser().parse_args(arguments)
 
     try:
         if args.command == "login":
