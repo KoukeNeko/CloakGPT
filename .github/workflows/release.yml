@@ -125,14 +125,25 @@ jobs:
 
           api_key_path="$RUNNER_TEMP/AuthKey.p8"
           archive_path="$RUNNER_TEMP/${{ matrix.asset }}.zip"
+          api_key_id="$(printf '%s' "$APPLE_API_KEY_ID" | tr -d '[:space:]')"
+          api_issuer_id="$(printf '%s' "$APPLE_API_ISSUER_ID" | tr -d '[:space:]')"
+          if [[ ! "$api_key_id" =~ ^[A-Za-z0-9]+$ ]]; then
+            echo "error: Apple API key ID must contain only letters and numbers" >&2
+            exit 1
+          fi
+          if [[ ! "$api_issuer_id" =~ ^[A-Fa-f0-9-]+$ ]]; then
+            echo "error: Apple API issuer ID must be a UUID" >&2
+            exit 1
+          fi
+
           printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 -D > "$api_key_path"
           chmod 600 "$api_key_path"
           ditto -c -k --keepParent "dist/${{ matrix.asset }}" "$archive_path"
 
           xcrun notarytool submit "$archive_path" \
             --key "$api_key_path" \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER_ID" \
+            --key-id "$api_key_id" \
+            --issuer "$api_issuer_id" \
             --wait
           spctl --assess --type execute --verbose=4 "dist/${{ matrix.asset }}"
       - name: Write SHA-256 checksum
