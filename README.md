@@ -73,6 +73,20 @@ The macOS executables are signed with a Developer ID Application certificate
 and notarized by Apple. The Windows executable is not currently code-signed, so
 Windows may display a warning when it is opened for the first time.
 
+## Install the Codex skill (optional)
+
+After installing CloakGPT, open a Codex task and send:
+
+```text
+$skill-installer install the skill from:
+https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt
+```
+
+Codex installs the skill as `use-cloakgpt` under `$CODEX_HOME/skills` (normally
+`~/.codex/skills`) and makes it available on the next turn. The skill teaches an
+agent when and how to use the local CloakGPT CLI; it does not install the
+CloakGPT executable or browser binary itself.
+
 ## Uninstall
 
 Linux and macOS:
