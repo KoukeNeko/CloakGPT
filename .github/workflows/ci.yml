@@ -59,8 +59,8 @@ jobs:
             "$cache_dir" \
             "$codex_home/skills/use-cloakgpt" \
             "$fake_bin"
-          cp /bin/true "$install_dir/cloakgpt"
-          cp /bin/true "$fake_bin/npx"
+          cp /usr/bin/true "$install_dir/cloakgpt"
+          cp /usr/bin/true "$fake_bin/npx"
 
           HOME="$test_home" \
           CLOAKGPT_INSTALL_DIR="$install_dir" \
