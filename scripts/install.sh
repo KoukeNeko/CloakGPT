@@ -67,10 +67,13 @@ fi
 
 mkdir -p "$install_dir"
 install -m 755 "$temp_dir/$asset" "$install_dir/cloakgpt"
+executable="$install_dir/cloakgpt"
 
-echo "Installed cloakgpt to $install_dir/cloakgpt"
+echo "Installed cloakgpt to $executable"
 echo "Installing the external CloakBrowser binary..."
-if "$install_dir/cloakgpt" browser install; then
+browser_installed=false
+if "$executable" browser install; then
+    browser_installed=true
     echo "CloakBrowser installed successfully."
 else
     echo "warning: CloakBrowser installation failed; CloakGPT remains installed." >&2
@@ -91,9 +94,68 @@ else
     if [ -n "$browser_overrides" ]; then
         echo "warning: check the detected environment overrides: $browser_overrides" >&2
     fi
-    echo "Retry with: '$install_dir/cloakgpt' browser install" >&2
+    echo "Retry with: '$executable' browser install" >&2
 fi
+
+login_state="NOT STARTED"
+if [ "$browser_installed" = true ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+        echo
+        echo "CloakGPT and CloakBrowser are ready. Opening ChatGPT login..."
+        if "$executable" login; then
+            login_state="FLOW COMPLETED"
+        else
+            login_state="INCOMPLETE"
+            echo "warning: ChatGPT login did not complete; run it again from the MOTD command." >&2
+        fi
+    else
+        login_state="WAITING FOR INTERACTIVE TERMINAL"
+    fi
+else
+    login_state="WAITING FOR CLOAKBROWSER"
+fi
+
+on_path=true
 case ":$PATH:" in
     *":$install_dir:"*) ;;
-    *) echo "Add $install_dir to PATH before running cloakgpt." ;;
+    *) on_path=false ;;
 esac
+
+echo
+echo "============================================================"
+if [ "$browser_installed" = true ] && [ "$login_state" = "FLOW COMPLETED" ]; then
+    echo "  CloakGPT is ready"
+else
+    echo "  CloakGPT installation needs one more step"
+fi
+echo "============================================================"
+echo "  Application : READY"
+echo "  Release     : $version ($asset)"
+echo "  Installed at: $executable"
+if [ "$browser_installed" = true ]; then
+    echo "  Browser     : READY"
+else
+    echo "  Browser     : NEEDS SETUP"
+fi
+echo "  Login       : $login_state"
+echo "------------------------------------------------------------"
+
+if [ "$browser_installed" != true ]; then
+    echo "  Next steps"
+    echo "    1. '$executable' browser install"
+    echo "    2. '$executable' login"
+elif [ "$login_state" != "FLOW COMPLETED" ]; then
+    echo "  Next step"
+    echo "    '$executable' login"
+else
+    echo "  Quick start"
+    echo "    session_id=\$('$executable' session open)"
+    echo "    '$executable' ask --session \"\$session_id\" \"Hello\""
+fi
+
+if [ "$on_path" != true ]; then
+    echo "------------------------------------------------------------"
+    echo "  PATH notice"
+    echo "    Add $install_dir to PATH to run: cloakgpt"
+fi
+echo "============================================================"

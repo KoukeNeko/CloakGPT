@@ -6,6 +6,61 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repository = "KoukeNeko/CloakGPT"
+
+function Write-InstallMotd {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Executable,
+        [Parameter(Mandatory)]
+        [bool]$BrowserInstalled,
+        [Parameter(Mandatory)]
+        [string]$LoginState,
+        [Parameter(Mandatory)]
+        [bool]$PathAdded,
+        [Parameter(Mandatory)]
+        [string]$Release
+    )
+
+    Write-Host ""
+    Write-Host "============================================================"
+    if ($BrowserInstalled -and $LoginState -eq "FLOW COMPLETED") {
+        Write-Host "  CloakGPT is ready"
+    } else {
+        Write-Host "  CloakGPT installation needs one more step"
+    }
+    Write-Host "============================================================"
+    Write-Host "  Application : READY"
+    Write-Host "  Release     : $Release"
+    Write-Host "  Installed at: $Executable"
+    if ($BrowserInstalled) {
+        Write-Host "  Browser     : READY"
+    } else {
+        Write-Host "  Browser     : NEEDS SETUP" -ForegroundColor Yellow
+    }
+    Write-Host "  Login       : $LoginState"
+    Write-Host "------------------------------------------------------------"
+
+    if (-not $BrowserInstalled) {
+        Write-Host "  Next steps"
+        Write-Host "    1. & `"$Executable`" browser install"
+        Write-Host "    2. & `"$Executable`" login"
+    } elseif ($LoginState -ne "FLOW COMPLETED") {
+        Write-Host "  Next step"
+        Write-Host "    & `"$Executable`" login"
+    } else {
+        Write-Host "  Quick start"
+        Write-Host "    `$sessionId = & `"$Executable`" session open"
+        Write-Host "    & `"$Executable`" ask --session `$sessionId `"Hello`""
+    }
+
+    if ($PathAdded) {
+        Write-Host "------------------------------------------------------------"
+        Write-Host "  PATH notice"
+        Write-Host "    Open a new terminal to run: cloakgpt"
+    }
+    Write-Host "============================================================"
+}
+
 $architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 $asset = switch ($architecture) {
     "X64" { "cloakgpt-windows-x86_64.exe" }
@@ -64,10 +119,12 @@ try {
 
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $pathEntries = @($userPath -split ";" | Where-Object { $_ })
+    $pathAdded = $false
     if ($InstallDir -notin $pathEntries) {
         $newUserPath = (($pathEntries + $InstallDir) -join ";")
         [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
-        Write-Host "Added $InstallDir to your user PATH. Open a new terminal to use it."
+        $pathAdded = $true
+        Write-Host "Added $InstallDir to your user PATH."
     }
 
     Write-Host "Installed cloakgpt to $installedExecutable"
@@ -103,6 +160,50 @@ try {
     } else {
         Write-Host "CloakBrowser installed successfully."
     }
+
+    $loginState = "NOT STARTED"
+    if ($browserInstalled) {
+        $interactive = $Host.Name -eq "ConsoleHost"
+        try {
+            $interactive = $interactive -and -not [Console]::IsInputRedirected
+        } catch {
+            $interactive = $false
+        }
+
+        if ($interactive) {
+            Write-Host ""
+            Write-Host "CloakGPT and CloakBrowser are ready. Opening ChatGPT login..."
+            try {
+                & $installedExecutable login
+                if ($LASTEXITCODE -eq 0) {
+                    $loginState = "FLOW COMPLETED"
+                } else {
+                    $loginState = "INCOMPLETE"
+                }
+            } catch {
+                $loginState = "INCOMPLETE"
+            }
+            if ($loginState -ne "FLOW COMPLETED") {
+                Write-Warning (
+                    "ChatGPT login did not complete; run it again from the " +
+                    "MOTD command."
+                )
+            }
+        } else {
+            $loginState = "WAITING FOR INTERACTIVE TERMINAL"
+        }
+    } else {
+        $loginState = "WAITING FOR CLOAKBROWSER"
+    }
+
+    $motdParameters = @{
+        Executable = $installedExecutable
+        BrowserInstalled = $browserInstalled
+        LoginState = $loginState
+        PathAdded = $pathAdded
+        Release = "$Version ($asset)"
+    }
+    Write-InstallMotd @motdParameters
 } finally {
     if (Test-Path -LiteralPath $tempDir) {
         Remove-Item -LiteralPath $tempDir -Recurse -Force

@@ -12,9 +12,17 @@ return the final response with Markdown formatting and citation sources.
 The installers download the executable for the current platform, verify its
 SHA-256 checksum, install it for the current user, and then download the
 external CloakBrowser binary. If the browser download fails, CloakGPT remains
-installed and the script prints a retry command. When custom CloakBrowser path,
-cache, license, version, channel, or download URL environment variables are
-detected, the failure message identifies the variables that should be checked.
+installed and the completion MOTD prints the browser retry and login commands.
+When both components install successfully in an interactive terminal, the
+installer automatically opens the visible ChatGPT login flow. Non-interactive
+installs and incomplete login attempts receive a copyable login command instead.
+When custom CloakBrowser path, cache, license, version, channel, or download URL
+environment variables are detected, the failure message identifies the
+variables that should be checked.
+
+The final MOTD reports the application, browser, and login state. A completed
+setup also includes persistent-session quick-start commands; Windows indicates
+when a new terminal is required for the updated user `PATH`.
 
 ### Linux and macOS
 
