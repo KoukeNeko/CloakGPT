@@ -21,16 +21,54 @@ from chatgpt_browser import (
 from cloakgpt_session import request_broker, run_broker
 
 
+EXISTING_BROWSER_SESSION_MARKERS = (
+    "Opening in existing browser session",
+    "既存のブラウザ セッションで開いています",
+)
+
+
+def _profile_already_open(error: Exception) -> bool:
+    message = str(error)
+    return (
+        "Target page, context or browser has been closed" in message
+        and any(marker in message for marker in EXISTING_BROWSER_SESSION_MARKERS)
+    )
+
+
+def _login_page(context):
+    pages = list(context.pages)
+    page = next(
+        (candidate for candidate in pages if candidate.url == "about:blank"),
+        pages[0] if pages else None,
+    )
+    if page is None:
+        return context.new_page()
+
+    for candidate in pages:
+        if candidate is not page and candidate.url == "about:blank":
+            candidate.close()
+    return page
+
+
 def login(timezone: str) -> None:
     """Open the persistent browser profile for an interactive ChatGPT login."""
-    context = launch_persistent_context(
-        str(DEFAULT_PROFILE_DIR),
-        headless=False,
-        locale="ja-JP",
-        timezone=timezone,
-    )
     try:
-        page = context.new_page()
+        context = launch_persistent_context(
+            str(DEFAULT_PROFILE_DIR),
+            headless=False,
+            locale="ja-JP",
+            timezone=timezone,
+        )
+    except Exception as error:
+        if _profile_already_open(error):
+            raise RuntimeError(
+                "the CloakGPT browser profile is already open. Close its "
+                "Chromium window; if a persistent session owns it, run "
+                "`cloakgpt daemon stop`; then retry `cloakgpt login`."
+            ) from None
+        raise
+    try:
+        page = _login_page(context)
         page.goto(CHATGPT_URL, wait_until="domcontentloaded")
         input("Sign in in the browser window, then press Enter here to save the session...")
     finally:
