@@ -183,6 +183,48 @@ RENDER_MARKDOWN_SCRIPT = r"""response => {
     .trim();
 }"""
 
+TURN_ID_SCRIPT = """response => response
+  .closest('section[data-turn="assistant"]')
+  ?.getAttribute('data-testid') || null"""
+
+RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId}) => {
+  const messages = document.querySelectorAll(
+    '[data-message-author-role="assistant"]'
+  );
+  const response = messages[messages.length - 1];
+  const turn = [...document.querySelectorAll('section[data-turn="assistant"]')]
+    .find(element => element.getAttribute('data-testid') === turnId);
+  const visible = element => !!(element && (
+    element.offsetWidth
+    || element.offsetHeight
+    || element.getClientRects().length
+  ));
+  const stopButtonVisible = [...document.querySelectorAll(
+    '[data-testid="stop-button"]'
+  )].some(visible);
+  const messageId = response?.getAttribute('data-message-id') || '';
+  const statusButton = [...(turn?.querySelectorAll('button') || [])]
+    .filter(visible)
+    .find(button => {
+      const text = (button.innerText || '').trim();
+      const ariaLabel = button.getAttribute('aria-label') || '';
+      return /思考中|考えました/.test(text)
+        || ariaLabel.endsWith('中');
+    });
+  return {
+    complete: messages.length > previousCount
+      && !!response?.innerText.trim()
+      && !messageId.startsWith('request-placeholder-')
+      && !response.querySelector('[aria-busy="true"]')
+      && !response.querySelector('.streaming-animation')
+      && !stopButtonVisible,
+    status: statusButton
+      ? ((statusButton.innerText || '').trim()
+        || statusButton.getAttribute('aria-label'))
+      : null
+  };
+}"""
+
 
 def _validate_question(question: str) -> None:
     if not question.strip():
@@ -262,7 +304,7 @@ def _extract_sources(page, response) -> list[ChatGPTSource]:
             if direct_source is not None:
                 sources.append(direct_source)
 
-        pill.hover()
+        pill.hover(force=True, timeout=5_000)
         page.wait_for_timeout(750)
         popovers = page.locator(SOURCE_POPOVER_SELECTOR)
         if not popovers.count():
@@ -307,30 +349,21 @@ def _wait_for_reply(
         timeout=0,
     )
     _emit_status(status_callback, "ChatGPT is responding...")
-    page.wait_for_function(
-        """previousCount => {
-        const messages = document.querySelectorAll(
-          '[data-message-author-role="assistant"]'
-        );
-        const response = messages[messages.length - 1];
-        const stopButtonVisible = [...document.querySelectorAll(
-          '[data-testid="stop-button"]'
-        )].some(stopButton => !!(
-          stopButton.offsetWidth
-          || stopButton.offsetHeight
-          || stopButton.getClientRects().length
-        ));
-        const messageId = response?.getAttribute('data-message-id') || '';
-        return messages.length > previousCount
-          && response?.innerText.trim()
-          && !messageId.startsWith('request-placeholder-')
-          && !response.querySelector('[aria-busy="true"]')
-          && !response.querySelector('.streaming-animation')
-          && !stopButtonVisible;
-        }""",
-        arg=previous_count,
-        timeout=0,
-    )
+    response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
+    turn_id = response.evaluate(TURN_ID_SCRIPT)
+    previous_status = None
+    while True:
+        state = page.evaluate(
+            RESPONSE_STATE_SCRIPT,
+            {"previousCount": previous_count, "turnId": turn_id},
+        )
+        current_status = state["status"]
+        if current_status and current_status != previous_status:
+            _emit_status(status_callback, f"ChatGPT activity: {current_status}")
+            previous_status = current_status
+        if state["complete"]:
+            break
+        page.wait_for_timeout(250)
     _emit_status(status_callback, "Collecting response and sources...")
     return _extract_response(page)
 

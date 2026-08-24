@@ -49,7 +49,11 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.responses = Mock()
         self.responses.count.return_value = 0
         self.responses.last.inner_text.return_value = "OK."
-        self.responses.last.evaluate.return_value = "OK."
+        self.responses.last.evaluate.side_effect = lambda script: (
+            "conversation-turn-2"
+            if script == chatgpt_browser.TURN_ID_SCRIPT
+            else "OK."
+        )
         self.citation_pills = Mock()
         self.citation_pills.count.return_value = 0
         self.responses.last.locator.return_value = self.citation_pills
@@ -72,6 +76,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             return locator_results.get(selector)
 
         self.page.locator.side_effect = locate
+        self.page.evaluate.return_value = {"complete": True, "status": None}
         self.reasoning_trigger.inner_text.return_value = "高い"
 
         self.context = Mock()
@@ -189,11 +194,33 @@ class ChatGPTBrowserTests(unittest.TestCase):
         status_callback.assert_any_call("Response complete.")
         for call in self.page.wait_for_function.call_args_list:
             self.assertEqual(call.kwargs["timeout"], 0)
-        completion_predicate = self.page.wait_for_function.call_args_list[1].args[0]
+        completion_predicate = chatgpt_browser.RESPONSE_STATE_SCRIPT
         self.assertIn('data-testid="stop-button"', completion_predicate)
         self.assertIn("request-placeholder-", completion_predicate)
         self.assertIn('aria-busy="true"', completion_predicate)
         self.assertIn("streaming-animation", completion_predicate)
+        self.assertIn("ariaLabel.endsWith('中')", completion_predicate)
+
+    def test_reports_native_chatgpt_activity_changes(self) -> None:
+        status_callback = Mock()
+        self.page.evaluate.side_effect = [
+            {"complete": False, "status": "ウェブを検索中"},
+            {"complete": False, "status": "2件のサイトを検索中"},
+            {"complete": False, "status": "13s考えました"},
+            {"complete": True, "status": "13s考えました"},
+        ]
+
+        chatgpt_browser.start_conversation(
+            "Search",
+            status_callback=status_callback,
+            profile_dir=self.profile_dir,
+            state_file=self.state_file,
+        )
+
+        status_callback.assert_any_call("ChatGPT activity: ウェブを検索中")
+        status_callback.assert_any_call("ChatGPT activity: 2件のサイトを検索中")
+        status_callback.assert_any_call("ChatGPT activity: 13s考えました")
+        self.assertEqual(self.page.wait_for_timeout.call_count, 3)
 
     def test_rejects_invalid_saved_url(self) -> None:
         self.state_file.write_text("https://example.com/c/test", encoding="utf-8")
@@ -273,7 +300,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
                 )
             ],
         )
-        pill.hover.assert_called_once_with()
+        pill.hover.assert_called_once_with(force=True, timeout=5_000)
         page.wait_for_timeout.assert_called_once_with(750)
 
     def test_extracts_all_sources_from_citation_carousel(self) -> None:

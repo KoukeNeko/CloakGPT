@@ -53,18 +53,22 @@ Browser progress and the current ChatGPT page settings are printed to stderr:
 [status] Sending message...
 [status] Waiting for ChatGPT response (Ctrl+C to stop)...
 [status] ChatGPT is responding...
+[status] ChatGPT activity: ウェブを検索中
+[status] ChatGPT activity: 2件のサイトを検索中
+[status] ChatGPT activity: 13s考えました
 [status] Collecting response and sources...
 [status] Response complete.
 ```
 
 Only the final response is printed to stdout, so it can be redirected or piped
-without including status lines. Rendered headings, lists, links, quotes, code
-blocks, and tables are converted back to Markdown. When ChatGPT cites web
-pages, citation pills and their source carousel are collected into a numbered
-`## Sources` section. Duplicate URLs are removed and ChatGPT's `utm_source`
-tracking parameter is omitted. Interactive DIL widgets such as weather charts
-are omitted because they do not have a faithful terminal representation; the
-model's accompanying text summary remains in the response.
+without including status lines. While waiting, native activity text from the
+latest ChatGPT turn is reported when it changes. Rendered headings, lists,
+links, quotes, code blocks, and tables are converted back to Markdown. When
+ChatGPT cites web pages, citation pills and their source carousel are collected
+into a numbered `## Sources` section. Duplicate URLs are removed and ChatGPT's
+`utm_source` tracking parameter is omitted. Interactive DIL widgets such as
+weather charts are omitted because they do not have a faithful terminal
+representation; the model's accompanying text summary remains in the response.
 
 Example:
 
