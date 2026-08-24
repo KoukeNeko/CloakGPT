@@ -313,6 +313,8 @@ class CloakGPTCliTests(unittest.TestCase):
         start_conversation,
     ) -> None:
         def run(_question, **options):
+            options["status_callback"]("Opening ChatGPT...")
+            options["status_callback"]("Sending message...")
             options["status_callback"]("ChatGPT is responding...")
             return "技術答案"
 
@@ -328,6 +330,8 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(
             [json.loads(line) for line in output.getvalue().splitlines()],
             [
+                {"type": "status", "message": "Opening ChatGPT..."},
+                {"type": "status", "message": "Sending message..."},
                 {"type": "status", "message": "ChatGPT is responding..."},
                 {"type": "result", "answer": "技術答案"},
             ],
