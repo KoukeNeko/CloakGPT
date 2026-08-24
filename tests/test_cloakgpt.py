@@ -307,6 +307,50 @@ class CloakGPTCliTests(unittest.TestCase):
             "[status] Waiting for ChatGPT response...",
         )
 
+    @patch("cloakgpt.start_conversation")
+    def test_jsonl_output_streams_status_and_result_to_stdout(
+        self,
+        start_conversation,
+    ) -> None:
+        def run(_question, **options):
+            options["status_callback"]("ChatGPT is responding...")
+            return "技術答案"
+
+        start_conversation.side_effect = run
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        with redirect_stdout(output), redirect_stderr(errors):
+            result = cloakgpt.main(["ask", "Hello", "--output", "jsonl"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(errors.getvalue(), "")
+        self.assertEqual(
+            [json.loads(line) for line in output.getvalue().splitlines()],
+            [
+                {"type": "status", "message": "ChatGPT is responding..."},
+                {"type": "result", "answer": "技術答案"},
+            ],
+        )
+
+    @patch("cloakgpt.start_conversation", side_effect=ValueError("not available"))
+    def test_jsonl_output_reports_machine_readable_error(
+        self,
+        _start_conversation,
+    ) -> None:
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        with redirect_stdout(output), redirect_stderr(errors):
+            result = cloakgpt.main(["ask", "Hello", "--output", "jsonl"])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(errors.getvalue(), "")
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {"type": "error", "message": "not available"},
+        )
+
     @patch("cloakgpt.start_conversation", side_effect=ValueError("not available"))
     def test_errors_are_reported_without_traceback(self, _start_conversation) -> None:
         errors = io.StringIO()

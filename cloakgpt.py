@@ -119,6 +119,37 @@ def show_status(message: str) -> None:
     print(f"[status] {message}", file=sys.stderr, flush=True)
 
 
+def _jsonl_status(message: str) -> None:
+    print(
+        json.dumps({"type": "status", "message": message}, ensure_ascii=False),
+        flush=True,
+    )
+
+
+def _status_callback(output_format: str):
+    return _jsonl_status if output_format == "jsonl" else show_status
+
+
+def _print_answer(answer: str, output_format: str) -> None:
+    if output_format == "jsonl":
+        print(
+            json.dumps({"type": "result", "answer": answer}, ensure_ascii=False),
+            flush=True,
+        )
+        return
+    print(answer)
+
+
+def _print_command_error(message: str, output_format: str) -> None:
+    if output_format == "jsonl":
+        print(
+            json.dumps({"type": "error", "message": message}, ensure_ascii=False),
+            flush=True,
+        )
+        return
+    print(f"error: {message}", file=sys.stderr)
+
+
 def run_browser_command(arguments: Sequence[str]) -> int:
     """Delegate browser management to CloakBrowser's official CLI."""
     original_argv = sys.argv
@@ -191,6 +222,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="start a conversation or send to a persistent session",
     )
     _add_shared_options(ask_parser, include_session=True)
+    ask_parser.add_argument(
+        "--output",
+        choices=("text", "jsonl"),
+        default="text",
+        dest="output_format",
+        help="output protocol (default: text; jsonl streams agent events to stdout)",
+    )
 
     session_parser = commands.add_parser(
         "session",
@@ -388,6 +426,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "update":
             return _run_update_command(args)
 
+        status_callback = _status_callback(args.output_format)
+
         session_id = (
             args.session or os.environ.get("CLOAKGPT_SESSION_ID")
             if args.command == "ask"
@@ -408,9 +448,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if args.reasoning is not None
                     else None,
                 },
-                status_callback=show_status,
+                status_callback=status_callback,
             )
-            print(result["answer"])
+            _print_answer(result["answer"], args.output_format)
             return 0
 
         answer = start_conversation(
@@ -419,16 +459,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             headless=args.headless,
             model=args.model,
             reasoning_level=args.reasoning,
-            status_callback=show_status,
+            status_callback=status_callback,
         )
     except KeyboardInterrupt:
-        print("stopped", file=sys.stderr)
+        output_format = getattr(args, "output_format", "text")
+        if output_format == "jsonl":
+            _print_command_error("stopped", output_format)
+        else:
+            print("stopped", file=sys.stderr)
         return 130
     except Exception as error:
-        print(f"error: {error}", file=sys.stderr)
+        _print_command_error(str(error), getattr(args, "output_format", "text"))
         return 1
 
-    print(answer)
+    _print_answer(answer, args.output_format)
     return 0
 
 
