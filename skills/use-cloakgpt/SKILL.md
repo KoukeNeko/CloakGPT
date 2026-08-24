@@ -89,7 +89,13 @@ Use the least invasive recovery step:
    profile, so obtain permission to stop it first; stopping preserves session
    IDs and conversation URLs. Never enter, request, or expose their ChatGPT
    password, cookies, or session tokens.
-5. For a headless page-state failure, retry once with `--headed` only when a
+5. If CloakGPT says the browser profile is already in use, or an older build
+   dumps a Chromium error ending in `exitCode=21`, run `cloakgpt daemon status`.
+   Reuse the known session ID if that daemon owns the intended conversation;
+   otherwise obtain permission before stopping it. If no daemon is running,
+   ask the user to close the CloakGPT Chromium window. Do not delete profile
+   lock files or terminate unrelated Chrome processes.
+6. For a headless page-state failure, retry once with `--headed` only when a
    visible diagnostic run is acceptable. Persistent sessions require stopping
    the daemon before changing browser mode; do not stop it without permission.
 
