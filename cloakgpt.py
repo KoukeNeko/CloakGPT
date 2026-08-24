@@ -1,6 +1,8 @@
 """Command-line interface for CloakGPT."""
 
 import argparse
+import json
+import os
 import sys
 from collections.abc import Sequence
 
@@ -15,6 +17,7 @@ from chatgpt_browser import (
     continue_conversation,
     start_conversation,
 )
+from cloakgpt_session import request_broker, run_broker
 
 
 def login(timezone: str) -> None:
@@ -33,7 +36,11 @@ def login(timezone: str) -> None:
         context.close()
 
 
-def _add_shared_options(parser: argparse.ArgumentParser) -> None:
+def _add_shared_options(
+    parser: argparse.ArgumentParser,
+    *,
+    include_session: bool = False,
+) -> None:
     parser.add_argument("question", help="message to send to ChatGPT")
     parser.add_argument(
         "--timezone",
@@ -58,6 +65,11 @@ def _add_shared_options(parser: argparse.ArgumentParser) -> None:
         dest="headless",
         help="show the browser window (default: run headless)",
     )
+    if include_session:
+        parser.add_argument(
+            "--session",
+            help="persistent session ID (or set CLOAKGPT_SESSION_ID)",
+        )
 
 
 def show_status(message: str) -> None:
@@ -105,27 +117,173 @@ def build_parser() -> argparse.ArgumentParser:
         help="install, inspect, update, or clear the CloakBrowser binary",
     )
 
-    ask_parser = commands.add_parser("ask", help="start a new conversation")
-    _add_shared_options(ask_parser)
+    ask_parser = commands.add_parser(
+        "ask",
+        help="start a conversation or send to a persistent session",
+    )
+    _add_shared_options(ask_parser, include_session=True)
 
     continue_parser = commands.add_parser(
         "continue",
         help="continue the last saved conversation",
     )
     _add_shared_options(continue_parser)
+
+    session_parser = commands.add_parser(
+        "session",
+        help="open, inspect, or close a persistent agent session",
+    )
+    session_commands = session_parser.add_subparsers(
+        dest="session_command",
+        required=True,
+    )
+    session_open = session_commands.add_parser(
+        "open",
+        help="open a persistent browser page and print its session ID",
+    )
+    session_open.add_argument(
+        "--timezone",
+        default="Asia/Taipei",
+        help="user's IANA timezone (default: Asia/Taipei)",
+    )
+    session_open.add_argument(
+        "--headed",
+        action="store_false",
+        dest="headless",
+        help="show the persistent browser window (default: run headless)",
+    )
+    for name in ("status", "close"):
+        session_action = session_commands.add_parser(name)
+        session_action.add_argument(
+            "session_id",
+            nargs="?",
+            help="session ID (or set CLOAKGPT_SESSION_ID)",
+        )
+
+    daemon_parser = commands.add_parser(
+        "daemon",
+        help="inspect or stop the persistent browser broker",
+    )
+    daemon_commands = daemon_parser.add_subparsers(
+        dest="daemon_command",
+        required=True,
+    )
+    daemon_commands.add_parser("status")
+    daemon_commands.add_parser("stop")
     return parser
+
+
+def _run_hidden_daemon(arguments: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--timezone", default="Asia/Taipei")
+    parser.add_argument("--headed", action="store_false", dest="headless")
+    args = parser.parse_args(arguments)
+    return run_broker(
+        data_dir=DEFAULT_PROFILE_DIR.parent,
+        headless=args.headless,
+        timezone=args.timezone,
+    )
+
+
+def _required_session_id(value: str | None) -> str:
+    session_id = value or os.environ.get("CLOAKGPT_SESSION_ID")
+    if not session_id:
+        raise ValueError(
+            "session ID required; pass --session/SESSION_ID or set CLOAKGPT_SESSION_ID"
+        )
+    return session_id
+
+
+def _print_session_motd(result: dict) -> None:
+    session_id = result["session_id"]
+    mode = "headless" if result["headless"] else "headed"
+    lease_minutes = int(result["ttl_seconds"]) // 60
+    print("[session] CloakGPT persistent conversation ready", file=sys.stderr)
+    print(f"[session] ID: {session_id}", file=sys.stderr)
+    print(
+        f"[session] Browser: {mode}, timezone={result['timezone']}, "
+        f"idle lease={lease_minutes} minutes",
+        file=sys.stderr,
+    )
+    print(
+        f'[session] Next: cloakgpt ask --session {session_id} "message"',
+        file=sys.stderr,
+    )
+
+
+def _run_session_command(args) -> int:
+    if args.session_command == "open":
+        result = request_broker(
+            {
+                "operation": "open",
+                "headless": args.headless,
+                "timezone": args.timezone,
+            },
+            headless=args.headless,
+            timezone=args.timezone,
+            status_callback=show_status,
+        )
+        _print_session_motd(result)
+        print(result["session_id"])
+        return 0
+
+    session_id = _required_session_id(args.session_id)
+    operation = "session_status" if args.session_command == "status" else "close"
+    result = request_broker({"operation": operation, "session_id": session_id})
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _run_daemon_control(command: str) -> int:
+    result = request_broker(
+        {"operation": "ping" if command == "status" else "stop"},
+        auto_start=False,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(argv) if argv is not None else sys.argv[1:]
     if arguments[:1] == ["browser"]:
         return run_browser_command(arguments[1:])
+    if arguments[:1] == ["_daemon"]:
+        return _run_hidden_daemon(arguments[1:])
 
     args = build_parser().parse_args(arguments)
 
     try:
         if args.command == "login":
             login(args.timezone)
+            return 0
+        if args.command == "session":
+            return _run_session_command(args)
+        if args.command == "daemon":
+            return _run_daemon_control(args.daemon_command)
+
+        session_id = (
+            args.session or os.environ.get("CLOAKGPT_SESSION_ID")
+            if args.command == "ask"
+            else None
+        )
+        if session_id:
+            if not args.headless:
+                raise ValueError(
+                    "browser mode is selected by session open; omit --headed"
+                )
+            result = request_broker(
+                {
+                    "operation": "send",
+                    "session_id": session_id,
+                    "question": args.question,
+                    "model": str(args.model) if args.model is not None else None,
+                    "reasoning": str(args.reasoning)
+                    if args.reasoning is not None
+                    else None,
+                },
+                status_callback=show_status,
+            )
+            print(result["answer"])
             return 0
 
         operation = (

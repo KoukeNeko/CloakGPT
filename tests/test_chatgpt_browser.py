@@ -238,6 +238,25 @@ class ChatGPTBrowserTests(unittest.TestCase):
         status_callback.assert_any_call("ChatGPT activity: 13s考えました")
         self.assertEqual(self.page.wait_for_timeout.call_count, 3)
 
+    def test_does_not_hide_unknown_delivery_after_send_click(self) -> None:
+        with (
+            patch(
+                "chatgpt_browser._wait_for_reply",
+                side_effect=RuntimeError("page disconnected"),
+            ),
+            self.assertRaisesRegex(
+                chatgpt_browser.DeliveryStateUnknownError,
+                "delivery state unknown",
+            ),
+        ):
+            chatgpt_browser.start_conversation(
+                "Hello",
+                profile_dir=self.profile_dir,
+                state_file=self.state_file,
+            )
+
+        self.send_button.click.assert_called_once_with()
+
     def test_rejects_invalid_saved_url(self) -> None:
         self.state_file.write_text("https://example.com/c/test", encoding="utf-8")
 

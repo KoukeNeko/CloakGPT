@@ -499,6 +499,64 @@ def _set_reasoning_level(page, reasoning_level: ReasoningLevel) -> None:
     raise RuntimeError("ChatGPT did not apply the selected reasoning level")
 
 
+class DeliveryStateUnknownError(RuntimeError):
+    """The prompt was clicked, but completion could not be confirmed."""
+
+
+def send_message_on_page(
+    page,
+    url: str,
+    question: str,
+    model: ChatGPTModel | None,
+    reasoning_level: ReasoningLevel | None,
+    status_callback: StatusCallback | None,
+    *,
+    reuse_page: bool = False,
+) -> tuple[str, str]:
+    _validate_question(question)
+
+    _emit_status(status_callback, "Opening ChatGPT...")
+    if not reuse_page or page.url != url:
+        page.goto(url, wait_until="domcontentloaded")
+
+    if model is not None:
+        _emit_status(status_callback, f"Selecting model: {model}")
+        _set_model(page, model)
+    if reasoning_level is not None:
+        _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
+        _set_reasoning_level(page, reasoning_level)
+
+    status = _read_page_status(page)
+    _emit_status(
+        status_callback,
+        f"Current page: model={status.model}, reasoning={status.reasoning}, url={status.url}",
+    )
+
+    editor = page.locator(PROMPT_EDITOR_SELECTOR)
+    editor.wait_for(state="visible", timeout=30_000)
+    previous_count = page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
+    editor.fill(question)
+
+    send_button = page.locator(SEND_BUTTON_SELECTOR)
+    send_button.wait_for(state="visible", timeout=10_000)
+    _emit_status(status_callback, "Sending message...")
+    send_button.click()
+
+    try:
+        _emit_status(status_callback, "Waiting for ChatGPT response (Ctrl+C to stop)...")
+        answer = _wait_for_reply(
+            page,
+            previous_count,
+            status_callback,
+        )
+        _emit_status(status_callback, "Response complete.")
+        return answer, page.url
+    except Exception as error:
+        raise DeliveryStateUnknownError(
+            "delivery state unknown; the prompt was sent but completion could not be confirmed"
+        ) from error
+
+
 def _send_message(
     url: str,
     question: str,
@@ -509,9 +567,6 @@ def _send_message(
     reasoning_level: ReasoningLevel | None,
     status_callback: StatusCallback | None,
 ) -> tuple[str, str]:
-    _validate_question(question)
-
-    _emit_status(status_callback, "Opening ChatGPT...")
     context = launch_persistent_context(
         str(profile_dir),
         headless=headless,
@@ -520,39 +575,14 @@ def _send_message(
     )
     try:
         page = context.new_page()
-        page.goto(url, wait_until="domcontentloaded")
-
-        if model is not None:
-            _emit_status(status_callback, f"Selecting model: {model}")
-            _set_model(page, model)
-        if reasoning_level is not None:
-            _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
-            _set_reasoning_level(page, reasoning_level)
-
-        status = _read_page_status(page)
-        _emit_status(
-            status_callback,
-            f"Current page: model={status.model}, reasoning={status.reasoning}, url={status.url}",
-        )
-
-        editor = page.locator(PROMPT_EDITOR_SELECTOR)
-        editor.wait_for(state="visible", timeout=30_000)
-        previous_count = page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
-        editor.fill(question)
-
-        send_button = page.locator(SEND_BUTTON_SELECTOR)
-        send_button.wait_for(state="visible", timeout=10_000)
-        _emit_status(status_callback, "Sending message...")
-        send_button.click()
-
-        _emit_status(status_callback, "Waiting for ChatGPT response (Ctrl+C to stop)...")
-        answer = _wait_for_reply(
+        return send_message_on_page(
             page,
-            previous_count,
+            url,
+            question,
+            model,
+            reasoning_level,
             status_callback,
         )
-        _emit_status(status_callback, "Response complete.")
-        return answer, page.url
     finally:
         context.close()
 

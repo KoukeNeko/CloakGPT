@@ -83,6 +83,48 @@ class CloakGPTCliTests(unittest.TestCase):
             status_callback=cloakgpt.show_status,
         )
 
+    @patch("cloakgpt.request_broker")
+    def test_open_session_prints_motd_and_machine_readable_id(self, request) -> None:
+        request.return_value = {
+            "session_id": "session-123",
+            "headless": True,
+            "timezone": "Asia/Taipei",
+            "ttl_seconds": 7200,
+        }
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        with redirect_stdout(output), redirect_stderr(errors):
+            result = cloakgpt.main(["session", "open"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(output.getvalue().strip(), "session-123")
+        self.assertIn("persistent conversation ready", errors.getvalue())
+        self.assertIn("idle lease=120 minutes", errors.getvalue())
+
+    @patch("cloakgpt.request_broker")
+    def test_ask_with_session_uses_persistent_broker(self, request) -> None:
+        request.return_value = {"answer": "Persistent answer"}
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = cloakgpt.main(
+                ["ask", "Hello", "--session", "session-123", "--reasoning", "high"]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(output.getvalue().strip(), "Persistent answer")
+        request.assert_called_once_with(
+            {
+                "operation": "send",
+                "session_id": "session-123",
+                "question": "Hello",
+                "model": None,
+                "reasoning": "high",
+            },
+            status_callback=cloakgpt.show_status,
+        )
+
     @patch("cloakgpt.continue_conversation", return_value="Next answer")
     def test_continue_command(self, continue_conversation) -> None:
         output = io.StringIO()
