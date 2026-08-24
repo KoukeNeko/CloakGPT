@@ -20,6 +20,11 @@ from chatgpt_browser import (
     start_conversation,
 )
 from cloakgpt_session import request_broker, run_broker
+from cloakgpt_update import (
+    consume_windows_update_result,
+    update_cloakgpt,
+    version_text,
+)
 
 
 EXISTING_BROWSER_SESSION_MARKERS = (
@@ -160,6 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Send messages through a user-owned ChatGPT browser session."
     )
+    parser.add_argument("--version", action="version", version=version_text())
     commands = parser.add_subparsers(dest="command", required=True)
 
     login_parser = commands.add_parser(
@@ -176,6 +182,32 @@ def build_parser() -> argparse.ArgumentParser:
         "browser",
         add_help=False,
         help="install, inspect, update, or clear the CloakBrowser binary",
+    )
+
+    update_parser = commands.add_parser(
+        "update",
+        help="check for or install a CloakGPT release",
+    )
+    update_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="report the selected release without changing files",
+    )
+    update_parser.add_argument(
+        "--channel",
+        choices=("stable", "prerelease"),
+        help="release channel; omit to preserve the current channel",
+    )
+    update_parser.add_argument(
+        "--version",
+        dest="target_version",
+        help="install an exact release tag",
+    )
+    update_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="write the final update result as JSON",
     )
 
     ask_parser = commands.add_parser(
@@ -308,8 +340,57 @@ def _run_daemon_control(command: str) -> int:
     return 0
 
 
+def _stop_daemon_for_update() -> None:
+    try:
+        request_broker({"operation": "stop"}, auto_start=False)
+    except RuntimeError as error:
+        if str(error) != "CloakGPT daemon is not running":
+            raise
+
+
+def _run_update_command(args) -> int:
+    if args.channel and args.target_version:
+        raise ValueError("--channel and --version cannot be used together")
+    result = update_cloakgpt(
+        channel=args.channel,
+        version=args.target_version,
+        check=args.check,
+        status_callback=show_status,
+        stop_daemon=_stop_daemon_for_update,
+    )
+    if args.json_output:
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+
+    print(f"Current: {result['current']}")
+    print(f"Target: {result['target']} ({result['asset']})")
+    if result["status"] == "up_to_date":
+        print("CloakGPT is up to date.")
+    elif result["status"] == "update_available":
+        print("An update is available.")
+    elif result["status"] == "staged":
+        print(
+            "Update staged. Windows will finish replacing CloakGPT after "
+            "this command exits."
+        )
+    else:
+        print(f"Updated CloakGPT to {result['target']}.")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     _configure_windows_utf8_stdio()
+    previous_update = consume_windows_update_result()
+    if previous_update:
+        if previous_update.get("status") == "updated":
+            show_status(
+                f"Previous Windows update completed: {previous_update.get('version')}"
+            )
+        else:
+            show_status(
+                "Previous Windows update failed: "
+                f"{previous_update.get('error', 'unknown error')}"
+            )
     arguments = list(argv) if argv is not None else sys.argv[1:]
     if arguments[:1] == ["browser"]:
         return run_browser_command(arguments[1:])
@@ -328,6 +409,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_session_command(args)
         if args.command == "daemon":
             return _run_daemon_control(args.daemon_command)
+        if args.command == "update":
+            return _run_update_command(args)
 
         session_id = (
             args.session or os.environ.get("CLOAKGPT_SESSION_ID")

@@ -38,6 +38,34 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+      - name: Write build metadata
+        shell: python
+        env:
+          CLOAKGPT_ASSET_NAME: ${{ matrix.asset }}
+        run: |
+          import os
+          from pathlib import Path
+
+          is_tag = os.environ.get("GITHUB_REF_TYPE") == "tag"
+          version = (
+              os.environ["GITHUB_REF_NAME"]
+              if is_tag
+              else f"dev-{os.environ['GITHUB_SHA'][:12]}"
+          )
+          channel = "prerelease" if is_tag and "-" in version else "stable"
+          Path("cloakgpt_build.py").write_text(
+              "\n".join(
+                  [
+                      '"""Generated release build metadata."""',
+                      "",
+                      f"VERSION = {version!r}",
+                      f"CHANNEL = {channel!r}",
+                      f"ASSET_NAME = {os.environ['CLOAKGPT_ASSET_NAME']!r}",
+                      "",
+                  ]
+              ),
+              encoding="utf-8",
+          )
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -111,6 +139,25 @@ jobs:
           source.rename(Path("dist") / "${{ matrix.asset }}")
       - name: Smoke test executable
         run: ./dist/${{ matrix.asset }} --help
+      - name: Verify embedded build metadata
+        shell: python
+        run: |
+          import os
+          import subprocess
+          from pathlib import Path
+
+          expected = (
+              os.environ["GITHUB_REF_NAME"]
+              if os.environ.get("GITHUB_REF_TYPE") == "tag"
+              else f"dev-{os.environ['GITHUB_SHA'][:12]}"
+          )
+          output = subprocess.check_output(
+              [str(Path("dist/${{ matrix.asset }}").resolve()), "--version"],
+              text=True,
+              encoding="utf-8",
+          )
+          if expected not in output or "${{ matrix.asset }}" not in output:
+              raise SystemExit(f"unexpected build metadata: {output!r}")
       - name: Smoke test bundled Playwright driver
         run: ./dist/${{ matrix.asset }} _playwright_check
       - name: Verify Developer ID signature

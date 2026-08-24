@@ -1,4 +1,5 @@
 import io
+import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import Mock, patch
@@ -7,6 +8,68 @@ import cloakgpt
 
 
 class CloakGPTCliTests(unittest.TestCase):
+    def test_version_option_reports_build_metadata(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(SystemExit) as exit_error:
+            cloakgpt.main(["--version"])
+
+        self.assertEqual(exit_error.exception.code, 0)
+        self.assertEqual(output.getvalue().strip(), cloakgpt.version_text())
+
+    @patch("cloakgpt.update_cloakgpt")
+    def test_update_command_preserves_current_channel(self, update) -> None:
+        update.return_value = {
+            "current": "v0.1.0-pre.4",
+            "target": "v0.1.0-pre.5",
+            "channel": "prerelease",
+            "asset": "cloakgpt-windows-x86_64.exe",
+            "status": "update_available",
+        }
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = cloakgpt.main(["update", "--check"])
+
+        self.assertEqual(result, 0)
+        self.assertIn("An update is available.", output.getvalue())
+        update.assert_called_once_with(
+            channel=None,
+            version=None,
+            check=True,
+            status_callback=cloakgpt.show_status,
+            stop_daemon=cloakgpt._stop_daemon_for_update,
+        )
+
+    @patch("cloakgpt.update_cloakgpt")
+    def test_update_command_supports_json(self, update) -> None:
+        update.return_value = {
+            "current": "v1.0.0",
+            "target": "v1.0.0",
+            "channel": "stable",
+            "asset": "cloakgpt-linux-x86_64",
+            "status": "up_to_date",
+        }
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = cloakgpt.main(["update", "--check", "--json"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output.getvalue())["status"], "up_to_date")
+
+    @patch("cloakgpt.update_cloakgpt")
+    def test_update_rejects_channel_with_exact_version(self, update) -> None:
+        errors = io.StringIO()
+
+        with redirect_stderr(errors):
+            result = cloakgpt.main(
+                ["update", "--channel", "stable", "--version", "v1.0.0"]
+            )
+
+        self.assertEqual(result, 1)
+        self.assertIn("--channel and --version", errors.getvalue())
+        update.assert_not_called()
+
     def test_windows_stdio_uses_utf8(self) -> None:
         stdin = Mock()
         stdout = Mock()
