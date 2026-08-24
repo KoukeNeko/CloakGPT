@@ -81,13 +81,15 @@ so the same `SKILL.md` works with Claude Code, Codex, Gemini CLI, and other
 compatible coding agents. Review the skill before installing it; an agent will
 follow its instructions with the permissions available to that agent.
 
-Use the cross-agent `skills` installer and name the target agent explicitly:
-Replace `AGENT_SLUG` with a literal value such as `claude-code`, `codex`, or
-`gemini-cli`.
+For an interactive installation, run:
 
 ```sh
-npx -y skills add https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt -g -a AGENT_SLUG -s use-cloakgpt -y
+npx -y skills add https://github.com/KoukeNeko/CloakGPT/tree/main/skills/use-cloakgpt -g
 ```
+
+The installer detects installed coding agents and asks which target to use when
+a choice is needed. The person installing the skill does not need to know an
+agent slug.
 
 Common slugs and their user-level destinations are:
 
