@@ -125,23 +125,6 @@ class CloakGPTCliTests(unittest.TestCase):
             status_callback=cloakgpt.show_status,
         )
 
-    @patch("cloakgpt.continue_conversation", return_value="Next answer")
-    def test_continue_command(self, continue_conversation) -> None:
-        output = io.StringIO()
-        with redirect_stdout(output):
-            result = cloakgpt.main(["continue", "More details"])
-
-        self.assertEqual(result, 0)
-        self.assertEqual(output.getvalue().strip(), "Next answer")
-        continue_conversation.assert_called_once_with(
-            "More details",
-            timezone="Asia/Taipei",
-            headless=True,
-            model=None,
-            reasoning_level=None,
-            status_callback=cloakgpt.show_status,
-        )
-
     @patch("cloakgpt.start_conversation", return_value="Visible answer")
     def test_headed_option_shows_browser(self, start_conversation) -> None:
         result = cloakgpt.main(["ask", "Hello", "--headed"])

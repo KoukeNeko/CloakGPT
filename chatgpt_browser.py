@@ -96,7 +96,6 @@ def get_default_data_dir() -> Path:
 
 DEFAULT_DATA_DIR = get_default_data_dir()
 DEFAULT_PROFILE_DIR = DEFAULT_DATA_DIR / "chatgpt-profile"
-DEFAULT_STATE_FILE = DEFAULT_DATA_DIR / ".chatgpt-conversation-url"
 
 StatusCallback = Callable[[str], None]
 
@@ -596,10 +595,9 @@ def start_conversation(
     reasoning_level: ReasoningLevel | None = None,
     status_callback: StatusCallback | None = None,
     profile_dir: Path = DEFAULT_PROFILE_DIR,
-    state_file: Path = DEFAULT_STATE_FILE,
 ) -> str:
     """Start a new ChatGPT conversation and return the response text."""
-    answer, conversation_url = _send_message(
+    answer, _ = _send_message(
         CHATGPT_URL,
         question,
         timezone,
@@ -609,38 +607,4 @@ def start_conversation(
         reasoning_level,
         status_callback,
     )
-    _validate_conversation_url(conversation_url)
-    state_file.write_text(conversation_url, encoding="utf-8")
-    return answer
-
-
-def continue_conversation(
-    question: str,
-    *,
-    timezone: str = "Asia/Taipei",
-    headless: bool = True,
-    model: ChatGPTModel | None = None,
-    reasoning_level: ReasoningLevel | None = None,
-    status_callback: StatusCallback | None = None,
-    profile_dir: Path = DEFAULT_PROFILE_DIR,
-    state_file: Path = DEFAULT_STATE_FILE,
-) -> str:
-    """Continue the saved ChatGPT conversation and return the response text."""
-    if not state_file.exists():
-        raise ValueError("no saved conversation; start a conversation first")
-
-    conversation_url = state_file.read_text(encoding="utf-8").strip()
-    _validate_conversation_url(conversation_url)
-    answer, current_url = _send_message(
-        conversation_url,
-        question,
-        timezone,
-        profile_dir,
-        headless,
-        model,
-        reasoning_level,
-        status_callback,
-    )
-    _validate_conversation_url(current_url)
-    state_file.write_text(current_url, encoding="utf-8")
     return answer

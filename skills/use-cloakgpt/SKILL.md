@@ -1,6 +1,6 @@
 ---
 name: use-cloakgpt
-description: Use the local CloakGPT CLI to ask ChatGPT through the user's signed-in browser session or continue its most recently saved conversation. Apply when the user explicitly wants an agent to send a prompt to ChatGPT, preserve ChatGPT model/reasoning settings, select supported settings, or return ChatGPT's Markdown answer and cited sources; do not use for ordinary questions that the agent can answer directly.
+description: Use the local CloakGPT CLI to ask ChatGPT through the user's signed-in browser session, including persistent multi-turn agent sessions. Apply when the user explicitly wants an agent to send a prompt to ChatGPT, preserve ChatGPT model/reasoning settings, select supported settings, or return ChatGPT's Markdown answer and cited sources; do not use for ordinary questions that the agent can answer directly.
 ---
 
 # Use CloakGPT
@@ -14,14 +14,10 @@ external ChatGPT conversation, so submit only messages the user requested.
   capture the session ID from stdout, and retain it for later turns. The MOTD and
   status are on stderr.
 - Send every persistent turn with `cloakgpt ask <question> --session <ID>`.
-  The first message creates a ChatGPT conversation; later messages continue on
-  the same live page. Do not use `continue` with a persistent session.
+  The first message creates a ChatGPT conversation; later messages reuse the
+  same live page.
 - Use `cloakgpt ask <question>` without a session for a one-shot new
   conversation.
-- Use `cloakgpt continue <question>` without a session only for the legacy most
-  recently saved one-shot conversation.
-- Do not silently substitute `ask` for a failed `continue`; explain that no saved
-  conversation is available and let the user decide whether to start one.
 - Prefer the installed `cloakgpt` command. In a source checkout where it is not
   installed, use that checkout's virtual-environment Python with `cloakgpt.py`.
 - Pass the question as one argument. Use the shell's safe argument quoting; do

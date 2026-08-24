@@ -3,9 +3,10 @@
 [![CI](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml)
 
 CloakGPT is a CLI that automates a user-owned ChatGPT session through
-CloakBrowser. It can start or continue conversations, select an
-available model and reasoning level, report ChatGPT's live page status, and
-return the final response with Markdown formatting and citation sources.
+CloakBrowser. It can start conversations, keep persistent agent sessions,
+select an available model and reasoning level, report ChatGPT's live page
+status, and return the final response with Markdown formatting and citation
+sources.
 
 ## Install a release
 
@@ -136,22 +137,20 @@ cloakgpt browser logout
 
 The default browser cache is `~/.cloakbrowser`. Set
 `CLOAKBROWSER_CACHE_DIR` to use another location. `clear-cache` removes the
-downloaded Chromium distribution, so the next `login`, `ask`, or `continue`
-command downloads it again.
+downloaded Chromium distribution, so the next `login` or `ask` command
+downloads it again.
 
-## Start and continue a conversation
+## Ask ChatGPT
 
 ```sh
 cloakgpt ask "Reply only: OK."
-cloakgpt continue "Explain your answer."
 ```
 
-`ask` starts a new conversation and saves its URL. `continue` reopens the most
-recent saved conversation. Both commands run headless by default, send the
-message, and wait without a response deadline because generation time depends
-on the model and prompt. Completion is detected from ChatGPT's active
-generation and assistant-turn state; press Ctrl+C to stop manually. Use
-`--headed` when you want to observe or debug the browser window:
+`ask` starts a new conversation. It runs headless by default, sends the message,
+and waits without a response deadline because generation time depends on the
+model and prompt. Completion is detected from ChatGPT's active generation and
+assistant-turn state; press Ctrl+C to stop manually. Use `--headed` when you
+want to observe or debug the browser window:
 
 ```sh
 cloakgpt ask "Reply only: OK." --headed
@@ -169,8 +168,7 @@ cloakgpt session open
 ```
 
 The command prints a short MOTD to stderr and prints only the session ID to
-stdout. Keep that ID and use `ask` for every turn; a separate persistent
-`continue` command is unnecessary:
+stdout. Keep that ID and use `ask` for every turn:
 
 ```sh
 cloakgpt ask "First question" --session SESSION_ID
@@ -245,7 +243,7 @@ summary remains in the response.
 
 ## Select a model and reasoning level
 
-Use `--model` and/or `--reasoning` with `ask` or `continue`:
+Use `--model` and/or `--reasoning` with `ask`:
 
 ```sh
 cloakgpt ask "Solve this carefully." --model gpt-5.6-sol --reasoning high

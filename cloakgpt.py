@@ -14,7 +14,6 @@ from chatgpt_browser import (
     ChatGPTModel,
     DEFAULT_PROFILE_DIR,
     ReasoningLevel,
-    continue_conversation,
     start_conversation,
 )
 from cloakgpt_session import request_broker, run_broker
@@ -122,12 +121,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="start a conversation or send to a persistent session",
     )
     _add_shared_options(ask_parser, include_session=True)
-
-    continue_parser = commands.add_parser(
-        "continue",
-        help="continue the last saved conversation",
-    )
-    _add_shared_options(continue_parser)
 
     session_parser = commands.add_parser(
         "session",
@@ -286,10 +279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(result["answer"])
             return 0
 
-        operation = (
-            start_conversation if args.command == "ask" else continue_conversation
-        )
-        answer = operation(
+        answer = start_conversation(
             args.question,
             timezone=args.timezone,
             headless=args.headless,

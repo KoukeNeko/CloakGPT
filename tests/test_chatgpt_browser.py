@@ -9,7 +9,6 @@ import chatgpt_browser
 class ChatGPTBrowserTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.state_file = Path(self.temp_dir.name) / "conversation-url"
         self.profile_dir = Path(self.temp_dir.name) / "profile"
 
         self.editor = Mock()
@@ -91,46 +90,28 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.launch_patch.stop()
         self.temp_dir.cleanup()
 
-    def test_start_and_continue_conversation(self) -> None:
-        first_answer = chatgpt_browser.start_conversation(
+    def test_start_conversation(self) -> None:
+        answer = chatgpt_browser.start_conversation(
             "First",
             profile_dir=self.profile_dir,
-            state_file=self.state_file,
-        )
-        second_answer = chatgpt_browser.continue_conversation(
-            "Second",
-            profile_dir=self.profile_dir,
-            state_file=self.state_file,
         )
 
-        self.assertEqual(first_answer, "OK.")
-        self.assertEqual(second_answer, "OK.")
-        self.assertEqual(
-            self.state_file.read_text(encoding="utf-8"),
-            "https://chatgpt.com/c/test-conversation",
+        self.assertEqual(answer, "OK.")
+        self.page.goto.assert_called_once_with(
+            chatgpt_browser.CHATGPT_URL,
+            wait_until="domcontentloaded",
         )
-        self.assertEqual(
-            self.page.goto.call_args_list[1].args[0],
-            "https://chatgpt.com/c/test-conversation",
-        )
-        self.editor.fill.assert_any_call("First")
-        self.editor.fill.assert_any_call("Second")
-        self.assertEqual(self.send_button.click.call_count, 2)
+        self.editor.fill.assert_called_once_with("First")
+        self.send_button.click.assert_called_once_with()
         self.model_option.click.assert_not_called()
         self.reasoning_option.click.assert_not_called()
-        self.assertTrue(
-            all(
-                call.kwargs["headless"]
-                for call in self.launch_context.call_args_list
-            )
-        )
+        self.assertTrue(self.launch_context.call_args.kwargs["headless"])
 
     def test_headed_conversation_shows_browser(self) -> None:
         chatgpt_browser.start_conversation(
             "Visible",
             headless=False,
             profile_dir=self.profile_dir,
-            state_file=self.state_file,
         )
 
         self.assertFalse(self.launch_context.call_args.kwargs["headless"])
@@ -140,7 +121,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "Hello",
             model=chatgpt_browser.ChatGPTModel.GPT_5_5,
             profile_dir=self.profile_dir,
-            state_file=self.state_file,
         )
 
         self.model_item.click.assert_called_once_with()
@@ -152,7 +132,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "Think",
             reasoning_level=chatgpt_browser.ReasoningLevel.HIGH,
             profile_dir=self.profile_dir,
-            state_file=self.state_file,
         )
 
         self.assertEqual(self.reasoning_trigger.click.call_count, 2)
@@ -170,7 +149,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
                 "Think",
                 reasoning_level=chatgpt_browser.ReasoningLevel.HIGH,
                 profile_dir=self.profile_dir,
-                state_file=self.state_file,
             )
 
     def test_keeps_reasoning_level_when_already_selected(self) -> None:
@@ -180,7 +158,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "Think",
             reasoning_level=chatgpt_browser.ReasoningLevel.HIGH,
             profile_dir=self.profile_dir,
-            state_file=self.state_file,
         )
 
         self.reasoning_option.click.assert_not_called()
@@ -194,7 +171,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "Hello",
             status_callback=status_callback,
             profile_dir=self.profile_dir,
-            state_file=self.state_file,
         )
 
         status_callback.assert_any_call("Opening ChatGPT...")
@@ -230,7 +206,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "Search",
             status_callback=status_callback,
             profile_dir=self.profile_dir,
-            state_file=self.state_file,
         )
 
         status_callback.assert_any_call("ChatGPT activity: ウェブを検索中")
@@ -252,20 +227,9 @@ class ChatGPTBrowserTests(unittest.TestCase):
             chatgpt_browser.start_conversation(
                 "Hello",
                 profile_dir=self.profile_dir,
-                state_file=self.state_file,
             )
 
         self.send_button.click.assert_called_once_with()
-
-    def test_rejects_invalid_saved_url(self) -> None:
-        self.state_file.write_text("https://example.com/c/test", encoding="utf-8")
-
-        with self.assertRaisesRegex(ValueError, "invalid ChatGPT conversation URL"):
-            chatgpt_browser.continue_conversation(
-                "Hello",
-                profile_dir=self.profile_dir,
-                state_file=self.state_file,
-            )
 
     def test_formats_sources_as_markdown_and_deduplicates_urls(self) -> None:
         response = chatgpt_browser._format_response(
