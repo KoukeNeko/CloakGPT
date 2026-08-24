@@ -125,11 +125,11 @@ to `stable`; interactive installs show a numbered choice. To install an exact
 tag or choose another directory, use:
 
 ```sh
-CLOAKGPT_VERSION=v0.1.0-pre.3 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
+CLOAKGPT_VERSION=v0.1.0-pre.4 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
 ```
 
 ```powershell
-.\install.ps1 -Version v0.1.0-pre.3 -InstallDir D:\Tools\CloakGPT
+.\install.ps1 -Version v0.1.0-pre.4 -InstallDir D:\Tools\CloakGPT
 ```
 
 An exact `CLOAKGPT_VERSION` or `-Version` takes precedence over the channel.
