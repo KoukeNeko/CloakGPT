@@ -426,6 +426,20 @@ want to observe or debug the browser window:
 cloakgpt ask "Reply only: OK." --headed
 ```
 
+Text output keeps progress on stderr and writes only the completed answer to
+stdout. Agent runtimes that monitor stdout one line at a time can request a
+machine-readable event stream instead:
+
+```sh
+cloakgpt ask "Reply only: OK." --output jsonl
+```
+
+Each flushed JSON line has `type` set to `status`, `result`, or `error`.
+`status` events contain `message`; the single successful `result` contains the
+complete Markdown `answer`. An `error` event is followed by a nonzero exit code.
+This makes progress observable through stdout-only monitors without mixing
+human status prefixes into the answer.
+
 `login` always uses a visible window so authentication can be completed
 interactively.
 
