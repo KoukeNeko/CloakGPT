@@ -14,6 +14,12 @@ class ChatGPTBrowserTests(unittest.TestCase):
 
         self.editor = Mock()
         self.send_button = Mock()
+        self.model_switcher = Mock()
+        self.model_menu = Mock()
+        self.model_option = Mock()
+        self.model_option.count.return_value = 1
+        self.model_menu.last = self.model_menu
+        self.model_menu.get_by_text.return_value = self.model_option
         self.responses = Mock()
         self.responses.count.return_value = 0
         self.responses.last.inner_text.return_value = "OK."
@@ -24,6 +30,8 @@ class ChatGPTBrowserTests(unittest.TestCase):
             chatgpt_browser.PROMPT_EDITOR_SELECTOR: self.editor,
             chatgpt_browser.SEND_BUTTON_SELECTOR: self.send_button,
             chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: self.responses,
+            chatgpt_browser.MODEL_SWITCHER_SELECTOR: self.model_switcher,
+            chatgpt_browser.MODEL_MENU_SELECTOR: self.model_menu,
         }.get
 
         self.context = Mock()
@@ -63,6 +71,30 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.editor.fill.assert_any_call("First")
         self.editor.fill.assert_any_call("Second")
         self.assertEqual(self.send_button.click.call_count, 2)
+
+    def test_selects_requested_reasoning_level(self) -> None:
+        chatgpt_browser.start_conversation(
+            "Think",
+            reasoning_level="high",
+            profile_dir=self.profile_dir,
+            state_file=self.state_file,
+        )
+
+        self.model_switcher.click.assert_called_once_with()
+        self.model_menu.get_by_text.assert_called_once_with("High", exact=True)
+        self.model_option.first.click.assert_called_once_with()
+
+    def test_reports_unavailable_reasoning_level(self) -> None:
+        self.model_option.count.return_value = 0
+        self.model_menu.inner_text.return_value = "Log in to select a model"
+
+        with self.assertRaisesRegex(ValueError, "Log in to select a model"):
+            chatgpt_browser.start_conversation(
+                "Think",
+                reasoning_level="extra-high",
+                profile_dir=self.profile_dir,
+                state_file=self.state_file,
+            )
 
     def test_rejects_invalid_saved_url(self) -> None:
         self.state_file.write_text("https://example.com/c/test", encoding="utf-8")

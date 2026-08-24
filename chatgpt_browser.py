@@ -11,6 +11,17 @@ CHATGPT_URL = "https://chatgpt.com/"
 PROMPT_EDITOR_SELECTOR = "#prompt-textarea"
 SEND_BUTTON_SELECTOR = '[data-testid="send-button"]'
 ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]'
+MODEL_SWITCHER_SELECTOR = '[data-testid="model-switcher-dropdown-button"]'
+MODEL_MENU_SELECTOR = '[role="menu"]'
+
+REASONING_LEVEL_LABELS = {
+    "instant": "Instant",
+    "medium": "Medium",
+    "high": "High",
+    "extra-high": "Extra High",
+    "pro-standard": "Pro Standard",
+    "pro-extended": "Pro Extended",
+}
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_PROFILE_DIR = PROJECT_DIR / "chatgpt-profile"
@@ -60,12 +71,35 @@ def _wait_for_reply(page, previous_count: int, timeout_seconds: int) -> str:
     raise TimeoutError("ChatGPT did not finish responding before the timeout")
 
 
+def _set_reasoning_level(page, reasoning_level: str) -> None:
+    try:
+        label = REASONING_LEVEL_LABELS[reasoning_level]
+    except KeyError as error:
+        choices = ", ".join(REASONING_LEVEL_LABELS)
+        raise ValueError(f"reasoning_level must be one of: {choices}") from error
+
+    switcher = page.locator(MODEL_SWITCHER_SELECTOR)
+    switcher.wait_for(state="visible", timeout=10_000)
+    switcher.click()
+
+    menu = page.locator(MODEL_MENU_SELECTOR).last
+    menu.wait_for(state="visible", timeout=10_000)
+    option = menu.get_by_text(label, exact=True)
+    if option.count() == 0:
+        available = " ".join(menu.inner_text().split())
+        raise ValueError(
+            f"reasoning level {label!r} is unavailable; model menu: {available}"
+        )
+    option.first.click()
+
+
 def _send_message(
     url: str,
     question: str,
     timezone: str,
     timeout_seconds: int,
     profile_dir: Path,
+    reasoning_level: str | None,
 ) -> tuple[str, str]:
     _validate_question(question)
     if timeout_seconds <= 0:
@@ -80,6 +114,9 @@ def _send_message(
     try:
         page = context.new_page()
         page.goto(url, wait_until="domcontentloaded")
+
+        if reasoning_level is not None:
+            _set_reasoning_level(page, reasoning_level)
 
         editor = page.locator(PROMPT_EDITOR_SELECTOR)
         editor.wait_for(state="visible", timeout=timeout_seconds * 1_000)
@@ -101,6 +138,7 @@ def start_conversation(
     *,
     timezone: str = "Asia/Taipei",
     timeout_seconds: int = 120,
+    reasoning_level: str | None = None,
     profile_dir: Path = DEFAULT_PROFILE_DIR,
     state_file: Path = DEFAULT_STATE_FILE,
 ) -> str:
@@ -111,6 +149,7 @@ def start_conversation(
         timezone,
         timeout_seconds,
         profile_dir,
+        reasoning_level,
     )
     _validate_conversation_url(conversation_url)
     state_file.write_text(conversation_url, encoding="utf-8")
@@ -122,6 +161,7 @@ def continue_conversation(
     *,
     timezone: str = "Asia/Taipei",
     timeout_seconds: int = 120,
+    reasoning_level: str | None = None,
     profile_dir: Path = DEFAULT_PROFILE_DIR,
     state_file: Path = DEFAULT_STATE_FILE,
 ) -> str:
@@ -137,6 +177,7 @@ def continue_conversation(
         timezone,
         timeout_seconds,
         profile_dir,
+        reasoning_level,
     )
     _validate_conversation_url(current_url)
     state_file.write_text(current_url, encoding="utf-8")
