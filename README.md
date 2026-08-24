@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml)
 
-CloakGPT is a CLI that automates a user-owned ChatGPT session through a
-visible CloakBrowser window. It can start or continue conversations, select an
+CloakGPT is a CLI that automates a user-owned ChatGPT session through
+CloakBrowser. It can start or continue conversations, select an
 available model and reasoning level, report ChatGPT's live page status, and
 return the final response with Markdown formatting and citation sources.
 
@@ -141,10 +141,18 @@ cloakgpt continue "Explain your answer."
 ```
 
 `ask` starts a new conversation and saves its URL. `continue` reopens the most
-recent saved conversation. The command opens a visible browser, sends the
-message, and waits without a response deadline because generation time depends
+recent saved conversation. Both commands run headless by default, send the
+message, and wait without a response deadline because generation time depends
 on the model and prompt. Completion is detected from ChatGPT's active
-generation and assistant-turn state; press Ctrl+C to stop manually.
+generation and assistant-turn state; press Ctrl+C to stop manually. Use
+`--headed` when you want to observe or debug the browser window:
+
+```sh
+cloakgpt ask "Reply only: OK." --headed
+```
+
+`login` always uses a visible window so authentication can be completed
+interactively.
 
 Status is printed to stderr while only the final response is printed to stdout,
 so responses can be redirected or piped without status lines:
