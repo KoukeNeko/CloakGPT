@@ -7,6 +7,22 @@ import cloakgpt
 
 
 class CloakGPTCliTests(unittest.TestCase):
+    @patch("cloakgpt.subprocess.run")
+    @patch("cloakgpt.compute_driver_executable", return_value=("node", "cli.js"))
+    def test_hidden_playwright_check_starts_driver(
+        self,
+        _compute_driver_executable,
+        run,
+    ) -> None:
+        result = cloakgpt.main(["_playwright_check"])
+
+        self.assertEqual(result, 0)
+        run.assert_called_once_with(
+            ["node", "cli.js", "run-driver"],
+            stdin=cloakgpt.subprocess.DEVNULL,
+            check=True,
+        )
+
     @patch("cloakgpt.cloakbrowser_main")
     def test_browser_command_delegates_to_cloakbrowser_cli(
         self,

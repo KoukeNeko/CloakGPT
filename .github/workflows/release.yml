@@ -111,6 +111,8 @@ jobs:
           source.rename(Path("dist") / "${{ matrix.asset }}")
       - name: Smoke test executable
         run: ./dist/${{ matrix.asset }} --help
+      - name: Smoke test bundled Playwright driver
+        run: ./dist/${{ matrix.asset }} _playwright_check
       - name: Verify Developer ID signature
         if: startsWith(matrix.target, 'macos-')
         shell: bash
@@ -118,6 +120,15 @@ jobs:
           set -euo pipefail
           codesign --verify --deep --strict --verbose=2 "dist/${{ matrix.asset }}"
           codesign --display --verbose=4 "dist/${{ matrix.asset }}"
+          entitlements="$RUNNER_TEMP/cloakgpt-entitlements.plist"
+          codesign --display --entitlements :- "dist/${{ matrix.asset }}" \
+            > "$entitlements" 2>/dev/null
+          /usr/libexec/PlistBuddy \
+            -c 'Print :com.apple.security.cs.allow-jit' \
+            "$entitlements" | grep -qx true
+          /usr/libexec/PlistBuddy \
+            -c 'Print :com.apple.security.cs.allow-unsigned-executable-memory' \
+            "$entitlements" | grep -qx true
       - name: Notarize macOS executable
         if: startsWith(matrix.target, 'macos-')
         shell: bash
@@ -182,6 +193,7 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/developer-id.p12" \
             "$RUNNER_TEMP/AuthKey.p8" \
+            "$RUNNER_TEMP/cloakgpt-entitlements.plist" \
             "$RUNNER_TEMP/${{ matrix.asset }}.zip"
 
   release:

@@ -40,4 +40,5 @@ exe = EXE(
     upx=False,
     console=True,
     codesign_identity=os.environ.get("MACOS_SIGNING_IDENTITY") or None,
+    entitlements_file="macos-entitlements.plist",
 )

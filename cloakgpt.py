@@ -3,11 +3,13 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Sequence
 
 from cloakbrowser import launch_persistent_context
 from cloakbrowser.__main__ import main as cloakbrowser_main
+from playwright._impl._driver import compute_driver_executable
 
 from chatgpt_browser import (
     CHATGPT_URL,
@@ -178,6 +180,16 @@ def _run_hidden_daemon(arguments: Sequence[str]) -> int:
     )
 
 
+def _run_hidden_playwright_check() -> int:
+    driver_executable, driver_cli = compute_driver_executable()
+    subprocess.run(
+        [driver_executable, driver_cli, "run-driver"],
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    return 0
+
+
 def _required_session_id(value: str | None) -> str:
     session_id = value or os.environ.get("CLOAKGPT_SESSION_ID")
     if not session_id:
@@ -242,6 +254,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_browser_command(arguments[1:])
     if arguments[:1] == ["_daemon"]:
         return _run_hidden_daemon(arguments[1:])
+    if arguments == ["_playwright_check"]:
+        return _run_hidden_playwright_check()
 
     args = build_parser().parse_args(arguments)
 
