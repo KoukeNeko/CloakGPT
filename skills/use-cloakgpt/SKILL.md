@@ -1,6 +1,6 @@
 ---
 name: use-cloakgpt
-description: Use or completely uninstall the local CloakGPT CLI. Apply when the user explicitly wants an agent to send a prompt through their signed-in ChatGPT browser session, manage a persistent multi-turn session, preserve or select supported page settings, return ChatGPT's Markdown answer and sources, or remove CloakGPT and its local data; do not use for ordinary questions the agent can answer directly.
+description: Use, update, or completely uninstall CloakGPT when the user asks an agent to operate their signed-in ChatGPT browser session, manage persistent conversations or page settings, preserve returned Markdown and sources, update the packaged CLI, or remove CloakGPT data; not for ordinary questions the agent can answer directly.
 ---
 
 # Use CloakGPT
@@ -92,6 +92,34 @@ Use the least invasive recovery step:
 5. For a headless page-state failure, retry once with `--headed` only when a
    visible diagnostic run is acceptable. Persistent sessions require stopping
    the daemon before changing browser mode; do not stop it without permission.
+
+## Update CloakGPT
+
+Checking is read-only and may be done when the installed version matters:
+
+```sh
+cloakgpt --version
+cloakgpt update --check --json
+```
+
+Install an update only when the user requested it or approved the mutation.
+`cloakgpt update` preserves the current build's stable or prerelease channel.
+Use `--channel stable`, `--channel prerelease`, or `--version TAG` only when the
+user selected that target; `--channel` and `--version` are mutually exclusive.
+
+An actual update verifies the downloaded release, stops the daemon, and
+preserves the browser profile and persistent session records. Tell the user if
+stopping an active daemon will close a warm browser page. On Windows, the
+command stages a hidden updater and replacement finishes just after the command
+exits. Verify the result with `cloakgpt --version`; if it still reports the old
+version, retry briefly for up to 10 seconds and report any update failure shown
+by the next invocation.
+
+Self-update works only for packaged releases. If a source checkout refuses it,
+do not overwrite files or run `git pull` across uncommitted changes; report the
+checkout and update it through its normal Git workflow when authorized.
+CloakBrowser is separate. Run `cloakgpt browser update` only when the user also
+requested a browser update or a diagnosed compatibility problem requires it.
 
 ## Completely uninstall CloakGPT
 
