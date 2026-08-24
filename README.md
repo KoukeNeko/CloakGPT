@@ -41,6 +41,12 @@ When custom CloakBrowser path, cache, license, version, channel, or download URL
 environment variables are detected, the failure message identifies the
 variables that should be checked.
 
+When no exact version is supplied, an interactive installer asks whether to
+install the latest stable or prerelease build. A non-interactive installer uses
+the stable channel unless `CLOAKGPT_CHANNEL=prerelease` or
+`-Channel prerelease` is supplied explicitly. If the selected channel has no
+published release, the installer stops with a clear error.
+
 The final MOTD reports the application, browser, and login state. A completed
 setup also includes persistent-session quick-start commands; Windows indicates
 when a new terminal is required for the updated user `PATH`.
@@ -100,15 +106,30 @@ agent when required.
 
 ## Release options and assets
 
-Install a specific release or choose another directory:
+Select a release channel in a non-interactive shell:
 
 ```sh
-CLOAKGPT_VERSION=v1.0.0 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
+CLOAKGPT_CHANNEL=prerelease sh install.sh
 ```
 
 ```powershell
-.\install.ps1 -Version v1.0.0 -InstallDir D:\Tools\CloakGPT
+.\install.ps1 -Channel prerelease
 ```
+
+Valid channels are `stable` and `prerelease`. Non-interactive installs default
+to `stable`; interactive installs show a numbered choice. To install an exact
+tag or choose another directory, use:
+
+```sh
+CLOAKGPT_VERSION=v0.1.0-pre.1 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
+```
+
+```powershell
+.\install.ps1 -Version v0.1.0-pre.1 -InstallDir D:\Tools\CloakGPT
+```
+
+An exact `CLOAKGPT_VERSION` or `-Version` takes precedence over the channel.
+The legacy value `latest` means the latest stable release.
 
 The release workflow produces these native executables:
 
@@ -162,17 +183,26 @@ Follow this procedure:
    that runtime's local or official documentation instead of guessing.
 2. Check whether a working `cloakgpt` executable is already installed. If it
    is, resolve and record its absolute path. Otherwise download, review, and run
-   the official installer for the current operating system:
+   the official installer for the current operating system. Use the release
+   channel requested by the user. If no channel was requested, ask the user to
+   choose `stable` or `prerelease`; do not silently install a prerelease. Pass
+   the selected channel explicitly because an agent terminal may be
+   non-interactive:
 
    Linux or macOS:
    curl -fsSLO https://raw.githubusercontent.com/KoukeNeko/CloakGPT/main/scripts/install.sh
-   sh install.sh
+   CLOAKGPT_CHANNEL=CHANNEL sh install.sh
    rm install.sh
 
    Windows PowerShell:
    Invoke-WebRequest https://raw.githubusercontent.com/KoukeNeko/CloakGPT/main/scripts/install.ps1 -OutFile install.ps1
-   powershell -ExecutionPolicy Bypass -File .\install.ps1
+   powershell -ExecutionPolicy Bypass -File .\install.ps1 -Channel CHANNEL
    Remove-Item .\install.ps1
+
+   Replace `CHANNEL` with the literal `stable` or `prerelease`. If the user
+   requested an exact tag, pass `CLOAKGPT_VERSION=TAG` on Linux/macOS or
+   `-Version TAG` on Windows instead; an exact tag takes precedence over the
+   channel.
 
    The installer verifies the release checksum and attempts the external
    browser installation. It may immediately open the visible ChatGPT login
