@@ -15,6 +15,7 @@ sources.
   - [Windows](#windows)
 - [Install the agent skill (recommended)](#install-the-agent-skill-recommended)
 - [Release options and assets](#release-options-and-assets)
+- [Update CloakGPT](#update-cloakgpt)
 - [Instructions for an agent](#instructions-for-an-agent)
 - [Uninstall](#uninstall)
 - [Login](#login)
@@ -149,6 +150,49 @@ The release workflow produces these native executables:
 The macOS executables are signed with a Developer ID Application certificate
 and notarized by Apple. The Windows executable is not currently code-signed, so
 Windows may display a warning when it is opened for the first time.
+
+## Update CloakGPT
+
+Packaged releases contain their exact version, channel, and platform asset.
+Display the installed build or check for an update without changing files:
+
+```sh
+cloakgpt --version
+cloakgpt update --check
+cloakgpt update --check --json
+```
+
+Install the latest release from the current build's channel:
+
+```sh
+cloakgpt update
+```
+
+A prerelease stays on the prerelease channel and a stable build stays on the
+stable channel unless one is selected explicitly:
+
+```sh
+cloakgpt update --channel stable
+cloakgpt update --channel prerelease
+cloakgpt update --version v0.1.0-pre.4
+```
+
+`--channel` and `--version` cannot be combined. Exact versions may upgrade or
+downgrade the installed build. Source checkouts do not overwrite themselves;
+update those with Git instead.
+
+Before replacement, CloakGPT verifies the release checksum, GitHub asset
+digest, embedded version, and bundled Playwright driver. An actual update stops
+the session daemon but preserves the browser profile and persistent session
+records. Linux and macOS replace the executable immediately. Windows stages a
+hidden UTF-8 updater that replaces the executable after the command exits,
+rolls back a failed build, and reports its result on the next CloakGPT command.
+
+The external browser remains independently managed. Update it only when needed:
+
+```sh
+cloakgpt browser update
+```
 
 ## Instructions for an agent
 
