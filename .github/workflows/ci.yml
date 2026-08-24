@@ -33,6 +33,47 @@ jobs:
       - name: Check POSIX scripts
         if: runner.os != 'Windows'
         run: sh -n scripts/install.sh scripts/uninstall.sh
+      - name: Test POSIX complete uninstall
+        if: runner.os != 'Windows'
+        shell: sh
+        run: |
+          set -eu
+          test_root=$(mktemp -d "${RUNNER_TEMP}/cloakgpt-uninstall.XXXXXX")
+          cleanup() {
+            case "$test_root" in
+              "${RUNNER_TEMP}/cloakgpt-uninstall."*) rm -rf "$test_root" ;;
+              *) echo "Refusing unsafe test cleanup: $test_root" >&2; exit 1 ;;
+            esac
+          }
+          trap cleanup EXIT HUP INT TERM
+
+          test_home="$test_root/home"
+          install_dir="$test_home/bin"
+          data_dir="$test_root/data"
+          cache_dir="$test_root/cache"
+          codex_home="$test_root/codex"
+          fake_bin="$test_root/fake-bin"
+          mkdir -p \
+            "$install_dir" \
+            "$data_dir" \
+            "$cache_dir" \
+            "$codex_home/skills/use-cloakgpt" \
+            "$fake_bin"
+          cp /bin/true "$install_dir/cloakgpt"
+          cp /bin/true "$fake_bin/npx"
+
+          HOME="$test_home" \
+          CLOAKGPT_INSTALL_DIR="$install_dir" \
+          CLOAKGPT_DATA_DIR="$data_dir" \
+          CLOAKBROWSER_CACHE_DIR="$cache_dir" \
+          CODEX_HOME="$codex_home" \
+          PATH="$fake_bin:/usr/bin:/bin" \
+            sh scripts/uninstall.sh --yes
+
+          test ! -e "$install_dir/cloakgpt"
+          test ! -e "$data_dir"
+          test ! -e "$cache_dir"
+          test ! -e "$codex_home/skills/use-cloakgpt"
       - name: Check PowerShell scripts
         if: runner.os == 'Windows'
         shell: pwsh
@@ -49,5 +90,67 @@ jobs:
             if ($errors.Count) {
               $errors | Write-Error
               exit 1
+            }
+          }
+      - name: Test PowerShell complete uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tempRoot = [IO.Path]::GetFullPath((Join-Path `
+            $env:RUNNER_TEMP `
+            ("cloakgpt-uninstall-" + [Guid]::NewGuid().ToString("N"))
+          ))
+          $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd("\")
+          if (-not $tempRoot.StartsWith(
+            $runnerTemp + "\",
+            [StringComparison]::OrdinalIgnoreCase
+          )) {
+            throw "Refusing unsafe test directory: $tempRoot"
+          }
+
+          New-Item -ItemType Directory -Path $tempRoot | Out-Null
+          try {
+            $installDir = Join-Path $tempRoot "install"
+            $dataDir = Join-Path $tempRoot "data"
+            $cacheDir = Join-Path $tempRoot "cache"
+            $codexHome = Join-Path $tempRoot "codex"
+            $fakeBin = Join-Path $tempRoot "fake-bin"
+            @(
+              $installDir,
+              $dataDir,
+              $cacheDir,
+              (Join-Path $codexHome "skills\use-cloakgpt"),
+              $fakeBin
+            ) | ForEach-Object {
+              New-Item -ItemType Directory -Path $_ -Force | Out-Null
+            }
+            Copy-Item `
+              "$env:SystemRoot\System32\where.exe" `
+              (Join-Path $installDir "cloakgpt.exe")
+            Set-Content `
+              -LiteralPath (Join-Path $fakeBin "npx.cmd") `
+              -Encoding Ascii `
+              -Value "@exit /b 0"
+
+            $env:CLOAKGPT_INSTALL_DIR = $installDir
+            $env:CLOAKGPT_DATA_DIR = $dataDir
+            $env:CLOAKBROWSER_CACHE_DIR = $cacheDir
+            $env:CODEX_HOME = $codexHome
+            $env:PATH = "$fakeBin;$env:PATH"
+            & .\scripts\uninstall.ps1 -Yes
+
+            @(
+              (Join-Path $installDir "cloakgpt.exe"),
+              $dataDir,
+              $cacheDir,
+              (Join-Path $codexHome "skills\use-cloakgpt")
+            ) | ForEach-Object {
+              if (Test-Path -LiteralPath $_) {
+                throw "Uninstaller left test artifact: $_"
+              }
+            }
+          } finally {
+            if (Test-Path -LiteralPath $tempRoot) {
+              Remove-Item -LiteralPath $tempRoot -Recurse -Force
             }
           }
