@@ -1,51 +1,116 @@
 # CloakGPT
 
-CloakGPT automates a user-owned ChatGPT browser session with CloakBrowser.
-The CLI can start a conversation, continue the last conversation, select an
-available reasoning level, and print the assistant's response as Markdown.
+[![CI](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml)
 
-## Setup
+CloakGPT is a CLI that automates a user-owned ChatGPT session through a
+visible CloakBrowser window. It can start or continue conversations, select an
+available model and reasoning level, report ChatGPT's live page status, and
+return the final response with Markdown formatting and citation sources.
 
-Requires Python 3.10 or newer.
+## Install a release
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+The installers download the executable for the current platform, verify its
+SHA-256 checksum, and install it for the current user. CloakBrowser downloads
+its Chromium binary on first use, so the first launch requires network access.
+
+### Linux and macOS
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/KoukeNeko/CloakGPT/main/scripts/install.sh
+sh install.sh
+rm install.sh
 ```
 
-CloakBrowser downloads its Chromium binary on first use. The browser profile
-is stored in `chatgpt-profile`, and the last conversation URL is stored in
-`.chatgpt-conversation-url`; both are excluded from Git.
+The default destination is `~/.local/bin/cloakgpt`. If that directory is not
+already on `PATH`, add it to your shell configuration.
+
+### Windows
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/KoukeNeko/CloakGPT/main/scripts/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+Remove-Item .\install.ps1
+```
+
+The default destination is `%LOCALAPPDATA%\Programs\CloakGPT\cloakgpt.exe`.
+The installer adds that directory to the user `PATH`; open a new terminal after
+installation.
+
+Install a specific release or choose another directory:
+
+```sh
+CLOAKGPT_VERSION=v1.0.0 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
+```
+
+```powershell
+.\install.ps1 -Version v1.0.0 -InstallDir D:\Tools\CloakGPT
+```
+
+The release workflow produces these native executables:
+
+| Platform | Architecture | Release asset |
+| --- | --- | --- |
+| Linux | x86-64 | `cloakgpt-linux-x86_64` |
+| Linux | ARM64 | `cloakgpt-linux-arm64` |
+| macOS | Intel | `cloakgpt-macos-x86_64` |
+| macOS | Apple Silicon | `cloakgpt-macos-arm64` |
+| Windows | x86-64 | `cloakgpt-windows-x86_64.exe` |
+
+The CI-produced executables are not currently code-signed or notarized, so the
+operating system may display a warning when they are opened for the first time.
+
+## Uninstall
+
+Linux and macOS:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/KoukeNeko/CloakGPT/main/scripts/uninstall.sh
+sh uninstall.sh
+rm uninstall.sh
+```
+
+Windows:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/KoukeNeko/CloakGPT/main/scripts/uninstall.ps1 -OutFile uninstall.ps1
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
+Remove-Item .\uninstall.ps1
+```
+
+Set `CLOAKGPT_INSTALL_DIR` or pass Windows `-InstallDir` if a custom destination
+was used. Uninstalling preserves the browser profile and conversation state so
+that a later installation remains signed in.
 
 ## Login
 
 Open the persistent browser profile, sign in to your own ChatGPT account, then
 return to the terminal and press Enter:
 
-```powershell
-.\.venv\Scripts\python.exe cloakgpt.py login
+```sh
+cloakgpt login
 ```
 
 The default user timezone is `Asia/Taipei`. Override it with an IANA timezone:
 
-```powershell
-.\.venv\Scripts\python.exe cloakgpt.py login --timezone America/New_York
+```sh
+cloakgpt login --timezone America/New_York
 ```
 
-## Start a conversation
+## Start and continue a conversation
 
-```powershell
-.\.venv\Scripts\python.exe cloakgpt.py ask "Reply only: OK."
+```sh
+cloakgpt ask "Reply only: OK."
+cloakgpt continue "Explain your answer."
 ```
 
-The command opens a visible browser, sends the message, waits for the response
-to finish, prints the response text, and saves the conversation URL. It waits
-without a response deadline because generation time depends on the model and
-prompt. Completion is detected from ChatGPT's active generation and assistant
-turn state rather than text stability; press Ctrl+C to stop it manually.
+`ask` starts a new conversation and saves its URL. `continue` reopens the most
+recent saved conversation. The command opens a visible browser, sends the
+message, and waits without a response deadline because generation time depends
+on the model and prompt. Completion is detected from ChatGPT's active
+generation and assistant-turn state; press Ctrl+C to stop manually.
 
-Browser progress and the current ChatGPT page settings are printed to stderr:
+Status is printed to stderr while only the final response is printed to stdout,
+so responses can be redirected or piped without status lines:
 
 ```text
 [status] Opening ChatGPT...
@@ -54,52 +119,27 @@ Browser progress and the current ChatGPT page settings are printed to stderr:
 [status] Waiting for ChatGPT response (Ctrl+C to stop)...
 [status] ChatGPT is responding...
 [status] ChatGPT activity: ウェブを検索中
-[status] ChatGPT activity: 2件のサイトを検索中
-[status] ChatGPT activity: 13s考えました
 [status] Collecting response and sources...
 [status] Response complete.
 ```
 
-Only the final response is printed to stdout, so it can be redirected or piped
-without including status lines. While waiting, native activity text from the
-latest ChatGPT turn is reported when it changes. Rendered headings, lists,
-links, quotes, code blocks, and tables are converted back to Markdown. When
-ChatGPT cites web pages, citation pills and their source carousel are collected
-into a numbered `## Sources` section. Duplicate URLs are removed and ChatGPT's
-`utm_source` tracking parameter is omitted. Interactive DIL widgets such as
-weather charts are omitted because they do not have a faithful terminal
-representation; the model's accompanying text summary remains in the response.
+Rendered headings, lists, links, quotes, code blocks, and tables are converted
+back to Markdown. Web citation pills and their source carousel are collected in
+a numbered `## Sources` section. Duplicate URLs and ChatGPT's `utm_source`
+tracking parameter are removed, and answers without citations do not receive an
+empty Sources section. Interactive widgets such as weather charts are omitted
+when they have no faithful terminal representation; the accompanying text
+summary remains in the response.
 
-Example:
+## Select a model and reasoning level
 
-```markdown
-台北最近天氣偏悶熱且不穩定。
+Use `--model` and/or `--reasoning` with `ask` or `continue`:
 
-## Sources
-
-1. [臺北市一週天氣預報](https://example.com/taipei-weather)
-2. [颱風影響時間預測](https://example.org/typhoon-report)
+```sh
+cloakgpt ask "Solve this carefully." --model gpt-5.6-sol --reasoning high
 ```
 
-Answers without web citations are printed without an empty Sources section.
-
-## Continue the conversation
-
-```powershell
-.\.venv\Scripts\python.exe cloakgpt.py continue "Explain your answer."
-```
-
-This reopens the conversation saved by the most recent `ask` command.
-
-## Select a reasoning level
-
-Use `--model` and/or `--reasoning` with either `ask` or `continue`:
-
-```powershell
-.\.venv\Scripts\python.exe cloakgpt.py ask "Solve this carefully." --model gpt-5.6-sol --reasoning high
-```
-
-Current model values are defined by the `ChatGPTModel` enum:
+Model values:
 
 | CLI value | ChatGPT label |
 | --- | --- |
@@ -107,8 +147,7 @@ Current model values are defined by the `ChatGPTModel` enum:
 | `gpt-5.5` | GPT-5.5 |
 | `o3` | o3 |
 
-Reasoning values are defined by the `ReasoningLevel` enum and map to the three
-options currently exposed by the advanced composer menu:
+Reasoning values:
 
 | CLI value | ChatGPT label |
 | --- | --- |
@@ -116,25 +155,72 @@ options currently exposed by the advanced composer menu:
 | `medium` | 中程度 |
 | `high` | 高い |
 
-Both options default to `None`. Omit `--model` to keep the current model, and
-omit `--reasoning` to keep the current reasoning level. The CLI reads the
-current settings for its status output but does not select a different option.
-Availability depends on the signed-in account's plan and workspace settings.
-If a requested value is unavailable, the CLI reports the visible menu instead
-of changing a private ChatGPT API.
+Both options default to `None`. Omit an option to keep ChatGPT's current page
+setting. Availability depends on the signed-in account and workspace. If a
+requested option is unavailable, the CLI reports the visible menu instead of
+using a private ChatGPT API.
 
-Other options:
+## User data
 
-```text
---timezone IANA_NAME   User's timezone; default: Asia/Taipei
+Packaged executables store the persistent browser profile and last conversation
+URL in the platform's user data directory:
+
+| Platform | Default data directory |
+| --- | --- |
+| Linux | `$XDG_DATA_HOME/CloakGPT`, or `~/.local/share/CloakGPT` |
+| macOS | `~/Library/Application Support/CloakGPT` |
+| Windows | `%LOCALAPPDATA%\CloakGPT` |
+
+Set `CLOAKGPT_DATA_DIR` to override this location. Source checkouts retain the
+original behavior and store data in the repository unless the environment
+variable is set.
+
+## Run from source
+
+Python 3.10 or newer is required. Use a virtual environment:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python cloakgpt.py login
 ```
 
-## Tests
+Windows PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python cloakgpt.py login
+```
+
+## Test and build
 
 The tests mock the browser and do not send messages to ChatGPT:
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```sh
+python -m unittest discover -s tests -v
+```
+
+Build the executable for the current operating system and CPU architecture:
+
+```sh
+python -m pip install -r requirements.txt -r requirements-build.txt
+python -m PyInstaller --clean --noconfirm cloakgpt.spec
+```
+
+The result is written to `dist/`. PyInstaller builds for the host platform, so
+the GitHub Actions matrix uses a native runner for each supported target.
+
+`.github/workflows/ci.yml` runs tests on Linux, macOS, and Windows for every
+push and pull request. `.github/workflows/release.yml` can be run manually to
+produce downloadable workflow artifacts. Pushing a version tag builds all five
+executables, generates checksum files, and publishes a GitHub release:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 Use the automation only with an account and websites you are authorized to
