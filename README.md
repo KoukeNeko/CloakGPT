@@ -434,11 +434,12 @@ machine-readable event stream instead:
 cloakgpt ask "Reply only: OK." --output jsonl
 ```
 
-Each flushed JSON line has `type` set to `status`, `result`, or `error`.
-`status` events contain `message`; the single successful `result` contains the
-complete Markdown `answer`. An `error` event is followed by a nonzero exit code.
-This makes progress observable through stdout-only monitors without mixing
-human status prefixes into the answer.
+Every emitted status is immediately flushed as its own JSON line. Each line has
+`type` set to `status`, `result`, or `error`. `status` events contain `message`;
+the single successful `result` contains the complete Markdown `answer`. An
+`error` event is followed by a nonzero exit code. This makes progress observable
+through stdout-only monitors without mixing human status prefixes into the
+answer.
 
 `login` always uses a visible window so authentication can be completed
 interactively.

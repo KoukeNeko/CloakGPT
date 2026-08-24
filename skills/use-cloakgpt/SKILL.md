@@ -69,14 +69,14 @@ cloakgpt ask "What is the weather today?" --timezone Asia/Taipei
   otherwise required.
 - In ordinary text mode, read progress from stderr and the completed answer
   from stdout. Do not return `[status]` lines as part of the answer.
-- If the runtime has a line-oriented stdout monitor but does not surface
-  foreground stderr live, run `cloakgpt ask ... --output jsonl` through that
-  monitor. Parse each JSON line by `type`: show or retain `status.message`, use
-  only `result.answer` as the completed response, and treat `error.message`
-  plus the nonzero exit as failure. Claude Code's Monitor is one example and
-  receives stdout lines; if such a monitor is unavailable, run the command in
-  the foreground and keep waiting instead of assuming that changing streams
-  can force the runtime UI to update.
+- For agent-driven calls, prefer `cloakgpt ask ... --output jsonl`. Every status
+  callback is immediately flushed as one stdout line. Parse every JSON line by
+  `type`: surface or retain each `status.message` in order, use only
+  `result.answer` as the completed response, and treat `error.message` plus the
+  nonzero exit as failure. When the runtime has a line-oriented stdout monitor,
+  run the command through it; Claude Code's Monitor is one example. If such a
+  monitor is unavailable, run the command in the foreground and keep waiting
+  instead of assuming that changing streams can force the runtime UI to update.
 - Preserve the returned Markdown. When the answer contains `## Sources`, retain
   those links and do not invent, rewrite, or remove citations.
 - Report a nonzero exit and its concise error instead of presenting partial
