@@ -2,13 +2,9 @@
 set -eu
 
 repository="KoukeNeko/CloakGPT"
-version="${CLOAKGPT_VERSION:-latest}"
+version="${CLOAKGPT_VERSION:-}"
+channel="${CLOAKGPT_CHANNEL:-}"
 install_dir="${CLOAKGPT_INSTALL_DIR:-$HOME/.local/bin}"
-
-case "$version" in
-    latest | v*) ;;
-    *) version="v$version" ;;
-esac
 
 case "$(uname -s)-$(uname -m)" in
     Linux-x86_64 | Linux-amd64)
@@ -34,18 +30,98 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-if [ "$version" = "latest" ]; then
-    download_base="https://github.com/$repository/releases/latest/download"
-else
-    download_base="https://github.com/$repository/releases/download/$version"
-fi
-
 temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/cloakgpt.XXXXXX")
 cleanup() {
-    rm -f "$temp_dir/$asset" "$temp_dir/$asset.sha256"
+    rm -f \
+        "$temp_dir/$asset" \
+        "$temp_dir/$asset.sha256" \
+        "$temp_dir/release.json"
     rmdir "$temp_dir" 2>/dev/null || true
 }
 trap cleanup EXIT HUP INT TERM
+
+if [ -n "$version" ]; then
+    case "$version" in
+        latest)
+            version=""
+            channel="stable"
+            ;;
+        v*) ;;
+        *) version="v$version" ;;
+    esac
+else
+    if [ -z "$channel" ]; then
+        if [ -t 0 ] && [ -t 1 ]; then
+            echo "Select a release channel:"
+            echo "  1) Stable"
+            echo "  2) Prerelease"
+            printf "Choice [1]: "
+            IFS= read -r channel || channel=""
+        else
+            channel="stable"
+        fi
+    fi
+
+    case "$channel" in
+        "" | 1 | stable) channel="stable" ;;
+        2 | prerelease) channel="prerelease" ;;
+        *)
+            echo "error: release channel must be 'stable' or 'prerelease'" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [ -z "$version" ]; then
+    if [ "$channel" = "stable" ]; then
+        releases_url="https://api.github.com/repos/$repository/releases/latest"
+    else
+        releases_url="https://api.github.com/repos/$repository/releases?per_page=100"
+    fi
+
+    if ! curl --fail --location --silent --show-error \
+        --header "Accept: application/vnd.github+json" \
+        --header "X-GitHub-Api-Version: 2022-11-28" \
+        --output "$temp_dir/release.json" "$releases_url"
+    then
+        echo "error: could not resolve the $channel release; it may not exist yet or GitHub may be unavailable" >&2
+        exit 1
+    fi
+
+    if [ "$channel" = "stable" ]; then
+        version=$(awk '
+            /"tag_name":/ {
+                line = $0
+                sub(/.*"tag_name":[[:space:]]*"/, "", line)
+                sub(/".*/, "", line)
+                print line
+                exit
+            }
+        ' "$temp_dir/release.json")
+    else
+        version=$(awk '
+            /"tag_name":/ {
+                line = $0
+                sub(/.*"tag_name":[[:space:]]*"/, "", line)
+                sub(/".*/, "", line)
+                tag = line
+            }
+            /"prerelease":[[:space:]]*true/ {
+                if (tag != "") {
+                    print tag
+                    exit
+                }
+            }
+        ' "$temp_dir/release.json")
+    fi
+
+    if [ -z "$version" ]; then
+        echo "error: no public $channel release was found" >&2
+        exit 1
+    fi
+fi
+
+download_base="https://github.com/$repository/releases/download/$version"
 
 echo "Downloading $asset ($version)..."
 curl --fail --location --silent --show-error \

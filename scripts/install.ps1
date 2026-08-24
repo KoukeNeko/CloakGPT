@@ -1,11 +1,18 @@
 [CmdletBinding()]
 param(
     [string]$Version = $env:CLOAKGPT_VERSION,
+    [string]$Channel = $env:CLOAKGPT_CHANNEL,
     [string]$InstallDir = $env:CLOAKGPT_INSTALL_DIR
 )
 
 $ErrorActionPreference = "Stop"
 $repository = "KoukeNeko/CloakGPT"
+$interactive = $Host.Name -eq "ConsoleHost"
+try {
+    $interactive = $interactive -and -not [Console]::IsInputRedirected
+} catch {
+    $interactive = $false
+}
 
 function Write-InstallMotd {
     param(
@@ -68,9 +75,55 @@ $asset = switch ($architecture) {
     default { throw "Unsupported Windows architecture: $architecture" }
 }
 
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = "latest"
-} elseif ($Version -ne "latest" -and -not $Version.StartsWith("v")) {
+if ([string]::IsNullOrWhiteSpace($Version) -or $Version -eq "latest") {
+    if ($Version -eq "latest") {
+        $Channel = "stable"
+    } elseif ([string]::IsNullOrWhiteSpace($Channel)) {
+        if ($interactive) {
+            Write-Host "Select a release channel:"
+            Write-Host "  1) Stable"
+            Write-Host "  2) Prerelease"
+            $Channel = Read-Host "Choice [1]"
+        } else {
+            $Channel = "stable"
+        }
+    }
+
+    $Channel = switch ($Channel.Trim().ToLowerInvariant()) {
+        { $_ -in @("", "1", "stable") } { "stable"; break }
+        { $_ -in @("2", "prerelease") } { "prerelease"; break }
+        default { throw "Release channel must be 'stable' or 'prerelease'" }
+    }
+
+    $apiHeaders = @{
+        Accept = "application/vnd.github+json"
+        "X-GitHub-Api-Version" = "2022-11-28"
+    }
+    try {
+        if ($Channel -eq "stable") {
+            $release = Invoke-RestMethod `
+                -Uri "https://api.github.com/repos/$repository/releases/latest" `
+                -Headers $apiHeaders
+        } else {
+            $releases = @(Invoke-RestMethod `
+                -Uri "https://api.github.com/repos/$repository/releases?per_page=100" `
+                -Headers $apiHeaders)
+            $release = $releases |
+                Where-Object { $_.prerelease -and -not $_.draft } |
+                Select-Object -First 1
+        }
+    } catch {
+        throw (
+            "Could not resolve the $Channel release; it may not exist yet " +
+            "or GitHub may be unavailable. $($_.Exception.Message)"
+        )
+    }
+
+    if ($null -eq $release -or [string]::IsNullOrWhiteSpace($release.tag_name)) {
+        throw "No public $Channel release was found"
+    }
+    $Version = $release.tag_name
+} elseif (-not $Version.StartsWith("v")) {
     $Version = "v$Version"
 }
 
@@ -79,11 +132,7 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 
-if ($Version -eq "latest") {
-    $downloadBase = "https://github.com/$repository/releases/latest/download"
-} else {
-    $downloadBase = "https://github.com/$repository/releases/download/$Version"
-}
+$downloadBase = "https://github.com/$repository/releases/download/$Version"
 
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
     [IO.Path]::DirectorySeparatorChar
@@ -163,13 +212,6 @@ try {
 
     $loginState = "NOT STARTED"
     if ($browserInstalled) {
-        $interactive = $Host.Name -eq "ConsoleHost"
-        try {
-            $interactive = $interactive -and -not [Console]::IsInputRedirected
-        } catch {
-            $interactive = $false
-        }
-
         if ($interactive) {
             Write-Host ""
             Write-Host "CloakGPT and CloakBrowser are ready. Opening ChatGPT login..."
