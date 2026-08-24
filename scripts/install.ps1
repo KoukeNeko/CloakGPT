@@ -71,7 +71,38 @@ try {
     }
 
     Write-Host "Installed cloakgpt to $installedExecutable"
-    Write-Host "Run '& `"$installedExecutable`" browser install' to download the external browser before first use."
+    Write-Host "Installing the external CloakBrowser binary..."
+    $browserInstalled = $false
+    try {
+        & $installedExecutable browser install
+        $browserInstalled = $LASTEXITCODE -eq 0
+    } catch {
+        $browserInstalled = $false
+    }
+    if (-not $browserInstalled) {
+        Write-Warning "CloakBrowser installation failed; CloakGPT remains installed."
+        $overrideNames = @(
+            "CLOAKBROWSER_BINARY_PATH",
+            "CLOAKBROWSER_CACHE_DIR",
+            "CLOAKBROWSER_DOWNLOAD_URL",
+            "CLOAKBROWSER_LICENSE_KEY",
+            "CLOAKBROWSER_RELEASE_CHANNEL",
+            "CLOAKBROWSER_VERSION"
+        ) | Where-Object {
+            -not [string]::IsNullOrWhiteSpace(
+                [Environment]::GetEnvironmentVariable($_)
+            )
+        }
+        if ($overrideNames.Count -gt 0) {
+            Write-Warning (
+                "Check the detected environment overrides: " +
+                ($overrideNames -join ", ")
+            )
+        }
+        Write-Host "Retry with: & `"$installedExecutable`" browser install"
+    } else {
+        Write-Host "CloakBrowser installed successfully."
+    }
 } finally {
     if (Test-Path -LiteralPath $tempDir) {
         Remove-Item -LiteralPath $tempDir -Recurse -Force

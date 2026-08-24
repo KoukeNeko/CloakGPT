@@ -69,7 +69,30 @@ mkdir -p "$install_dir"
 install -m 755 "$temp_dir/$asset" "$install_dir/cloakgpt"
 
 echo "Installed cloakgpt to $install_dir/cloakgpt"
-echo "Run 'cloakgpt browser install' to download the external browser before first use."
+echo "Installing the external CloakBrowser binary..."
+if "$install_dir/cloakgpt" browser install; then
+    echo "CloakBrowser installed successfully."
+else
+    echo "warning: CloakBrowser installation failed; CloakGPT remains installed." >&2
+    browser_overrides=""
+    for name in \
+        CLOAKBROWSER_BINARY_PATH \
+        CLOAKBROWSER_CACHE_DIR \
+        CLOAKBROWSER_DOWNLOAD_URL \
+        CLOAKBROWSER_LICENSE_KEY \
+        CLOAKBROWSER_RELEASE_CHANNEL \
+        CLOAKBROWSER_VERSION
+    do
+        eval "value=\${$name:-}"
+        if [ -n "$value" ]; then
+            browser_overrides="${browser_overrides}${browser_overrides:+, }$name"
+        fi
+    done
+    if [ -n "$browser_overrides" ]; then
+        echo "warning: check the detected environment overrides: $browser_overrides" >&2
+    fi
+    echo "Retry with: '$install_dir/cloakgpt' browser install" >&2
+fi
 case ":$PATH:" in
     *":$install_dir:"*) ;;
     *) echo "Add $install_dir to PATH before running cloakgpt." ;;
