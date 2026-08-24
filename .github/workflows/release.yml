@@ -46,6 +46,51 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-build.txt
       - name: Run tests
         run: python -m unittest discover -s tests -v
+      - name: Import Developer ID certificate
+        if: startsWith(matrix.target, 'macos-')
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$MACOS_CERTIFICATE_P12_BASE64" || -z "$MACOS_CERTIFICATE_PASSWORD" ]]; then
+            echo "error: macOS signing secrets are not configured" >&2
+            exit 1
+          fi
+
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/cloakgpt-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 -D > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+
+          identities="$(
+            security find-identity -v -p codesigning "$keychain_path" |
+              awk '/Developer ID Application:/ {print $2}'
+          )"
+          identity_count="$(printf '%s\n' "$identities" | grep -c . || true)"
+          if [[ "$identity_count" -ne 1 ]]; then
+            echo "error: expected exactly one Developer ID Application identity; found $identity_count" >&2
+            security find-identity -v -p codesigning "$keychain_path"
+            exit 1
+          fi
+
+          echo "MACOS_SIGNING_IDENTITY=$(printf '%s\n' "$identities" | head -n 1)" >> "$GITHUB_ENV"
       - name: Build executable
         run: python -m PyInstaller --clean --noconfirm cloakgpt.spec
       - name: Name release asset
@@ -57,6 +102,39 @@ jobs:
           source.rename(Path("dist") / "${{ matrix.asset }}")
       - name: Smoke test executable
         run: ./dist/${{ matrix.asset }} --help
+      - name: Verify Developer ID signature
+        if: startsWith(matrix.target, 'macos-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 "dist/${{ matrix.asset }}"
+          codesign --display --verbose=4 "dist/${{ matrix.asset }}"
+      - name: Notarize macOS executable
+        if: startsWith(matrix.target, 'macos-')
+        shell: bash
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$APPLE_API_KEY_P8_BASE64" || -z "$APPLE_API_KEY_ID" || -z "$APPLE_API_ISSUER_ID" ]]; then
+            echo "error: Apple notarization secrets are not configured" >&2
+            exit 1
+          fi
+
+          api_key_path="$RUNNER_TEMP/AuthKey.p8"
+          archive_path="$RUNNER_TEMP/${{ matrix.asset }}.zip"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 -D > "$api_key_path"
+          chmod 600 "$api_key_path"
+          ditto -c -k --keepParent "dist/${{ matrix.asset }}" "$archive_path"
+
+          xcrun notarytool submit "$archive_path" \
+            --key "$api_key_path" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait
+          spctl --assess --type execute --verbose=4 "dist/${{ matrix.asset }}"
       - name: Write SHA-256 checksum
         shell: python
         run: |
@@ -77,6 +155,15 @@ jobs:
             dist/${{ matrix.asset }}.sha256
           if-no-files-found: error
           compression-level: 0
+      - name: Remove signing materials
+        if: always() && startsWith(matrix.target, 'macos-')
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/cloakgpt-signing.keychain-db" 2>/dev/null || true
+          rm -f \
+            "$RUNNER_TEMP/developer-id.p12" \
+            "$RUNNER_TEMP/AuthKey.p8" \
+            "$RUNNER_TEMP/${{ matrix.asset }}.zip"
 
   release:
     name: Publish GitHub release

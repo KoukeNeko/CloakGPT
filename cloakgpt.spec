@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
 
@@ -37,4 +39,5 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
+    codesign_identity=os.environ.get("MACOS_SIGNING_IDENTITY") or None,
 )
