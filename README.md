@@ -12,6 +12,11 @@ return the final response with Markdown formatting and citation sources.
 The installers download the executable for the current platform, verify its
 SHA-256 checksum, and install it for the current user. CloakBrowser downloads
 its Chromium binary on first use, so the first launch requires network access.
+Pre-download the external browser after installing CloakGPT with:
+
+```sh
+cloakgpt browser install
+```
 
 ### Linux and macOS
 
@@ -96,6 +101,36 @@ The default user timezone is `Asia/Taipei`. Override it with an IANA timezone:
 ```sh
 cloakgpt login --timezone America/New_York
 ```
+
+## Manage the external browser
+
+The CloakBrowser Python wrapper and Playwright driver are included in the
+CloakGPT executable. The much larger stealth Chromium distribution remains
+separate and is downloaded directly from CloakBrowser's official service into
+its user cache.
+
+```sh
+cloakgpt browser install
+cloakgpt browser info --quick
+cloakgpt browser update
+cloakgpt browser clear-cache
+```
+
+These commands delegate to CloakBrowser's official management CLI, including
+its platform selection, license handling, and binary verification. Additional
+official commands and options are available through:
+
+```sh
+cloakgpt browser --help
+cloakgpt browser doctor
+cloakgpt browser login
+cloakgpt browser logout
+```
+
+The default browser cache is `~/.cloakbrowser`. Set
+`CLOAKBROWSER_CACHE_DIR` to use another location. `clear-cache` removes the
+downloaded Chromium distribution, so the next `login`, `ask`, or `continue`
+command downloads it again.
 
 ## Start and continue a conversation
 

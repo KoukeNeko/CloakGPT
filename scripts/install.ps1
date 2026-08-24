@@ -66,6 +66,7 @@ try {
     }
 
     Write-Host "Installed cloakgpt to $installedExecutable"
+    Write-Host "Run '& `"$installedExecutable`" browser install' to download the external browser before first use."
 } finally {
     if (Test-Path -LiteralPath $tempDir) {
         Remove-Item -LiteralPath $tempDir -Recurse -Force

@@ -69,6 +69,7 @@ mkdir -p "$install_dir"
 install -m 755 "$temp_dir/$asset" "$install_dir/cloakgpt"
 
 echo "Installed cloakgpt to $install_dir/cloakgpt"
+echo "Run 'cloakgpt browser install' to download the external browser before first use."
 case ":$PATH:" in
     *":$install_dir:"*) ;;
     *) echo "Add $install_dir to PATH before running cloakgpt." ;;
