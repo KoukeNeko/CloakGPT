@@ -136,8 +136,8 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(result, 2)
 
     @patch("builtins.input", return_value="")
-    @patch("cloakgpt.launch_persistent_context")
-    def test_login_command(self, launch_persistent_context, user_input) -> None:
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_command(self, launch_chatgpt_context, user_input) -> None:
         context = Mock()
         login_page = Mock()
         login_page.url = "about:blank"
@@ -146,15 +146,14 @@ class CloakGPTCliTests(unittest.TestCase):
         existing_page = Mock()
         existing_page.url = "https://example.com/"
         context.pages = [login_page, extra_blank_page, existing_page]
-        launch_persistent_context.return_value = context
+        launch_chatgpt_context.return_value = context
 
         result = cloakgpt.main(["login", "--timezone", "Asia/Taipei"])
 
         self.assertEqual(result, 0)
-        launch_persistent_context.assert_called_once_with(
-            str(cloakgpt.DEFAULT_PROFILE_DIR),
+        launch_chatgpt_context.assert_called_once_with(
+            cloakgpt.DEFAULT_PROFILE_DIR,
             headless=False,
-            locale="ja-JP",
             timezone="Asia/Taipei",
         )
         context.new_page.assert_not_called()
@@ -168,15 +167,15 @@ class CloakGPTCliTests(unittest.TestCase):
         context.close.assert_called_once_with()
 
     @patch("builtins.input", return_value="")
-    @patch("cloakgpt.launch_persistent_context")
+    @patch("cloakgpt.launch_chatgpt_context")
     def test_login_creates_page_when_context_has_none(
         self,
-        launch_persistent_context,
+        launch_chatgpt_context,
         _user_input,
     ) -> None:
         context = Mock()
         context.pages = []
-        launch_persistent_context.return_value = context
+        launch_chatgpt_context.return_value = context
 
         result = cloakgpt.main(["login"])
 
@@ -187,15 +186,16 @@ class CloakGPTCliTests(unittest.TestCase):
             wait_until="domcontentloaded",
         )
 
-    @patch("cloakgpt.launch_persistent_context")
+    @patch("cloakgpt.launch_chatgpt_context")
     def test_login_reports_existing_profile_without_browser_log(
         self,
-        launch_persistent_context,
+        launch_chatgpt_context,
     ) -> None:
-        launch_persistent_context.side_effect = RuntimeError(
-            "Target page, context or browser has been closed\n"
-            "[out] 既存のブラウザ セッションで開いています。\n"
-            "Browser logs: noisy details"
+        launch_chatgpt_context.side_effect = RuntimeError(
+            "the CloakGPT browser profile is already in use. Close any "
+            "CloakGPT Chromium window. If `cloakgpt daemon status` reports "
+            "a running daemon, reuse its known `--session` ID or run "
+            "`cloakgpt daemon stop`; then retry."
         )
         errors = io.StringIO()
 
@@ -205,9 +205,10 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(
             errors.getvalue().strip(),
-            "error: the CloakGPT browser profile is already open. Close its "
-            "Chromium window; if a persistent session owns it, run "
-            "`cloakgpt daemon stop`; then retry `cloakgpt login`.",
+            "error: the CloakGPT browser profile is already in use. Close any "
+            "CloakGPT Chromium window. If `cloakgpt daemon status` reports "
+            "a running daemon, reuse its known `--session` ID or run "
+            "`cloakgpt daemon stop`; then retry.",
         )
 
     @patch("cloakgpt.start_conversation", return_value="First answer")

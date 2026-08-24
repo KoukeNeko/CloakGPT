@@ -107,6 +107,38 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.reasoning_option.click.assert_not_called()
         self.assertTrue(self.launch_context.call_args.kwargs["headless"])
 
+    def test_reports_windows_profile_in_use_without_browser_log(self) -> None:
+        self.launch_context.side_effect = RuntimeError(
+            "Target page, context or browser has been closed\n"
+            "[pid=41108] <process did exit: exitCode=21, signal=null>\n"
+            "Browser logs: noisy details"
+        )
+
+        with self.assertRaisesRegex(
+            chatgpt_browser.ProfileInUseError,
+            "browser profile is already in use",
+        ) as error:
+            chatgpt_browser.start_conversation(
+                "Hello",
+                profile_dir=self.profile_dir,
+            )
+
+        self.assertNotIn("Browser logs", str(error.exception))
+        self.assertIn("cloakgpt daemon status", str(error.exception))
+        self.assertIn("cloakgpt daemon stop", str(error.exception))
+
+    def test_reports_localized_existing_browser_session_as_profile_in_use(self) -> None:
+        self.launch_context.side_effect = RuntimeError(
+            "Target page, context or browser has been closed\n"
+            "[out] 既存のブラウザ セッションで開いています。"
+        )
+
+        with self.assertRaises(chatgpt_browser.ProfileInUseError):
+            chatgpt_browser.start_conversation(
+                "Hello",
+                profile_dir=self.profile_dir,
+            )
+
     def test_headed_conversation_shows_browser(self) -> None:
         chatgpt_browser.start_conversation(
             "Visible",

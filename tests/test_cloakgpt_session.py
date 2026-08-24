@@ -17,7 +17,7 @@ class SessionBrokerTests(unittest.TestCase):
         self.context = Mock()
         self.context.new_page.return_value = self.page
         self.launch_patch = patch(
-            "cloakgpt_session.launch_persistent_context",
+            "cloakgpt_session.launch_chatgpt_context",
             return_value=self.context,
         )
         self.launch = self.launch_patch.start()
@@ -104,9 +104,8 @@ class SessionBrokerTests(unittest.TestCase):
         self.assertEqual(first["answer"], "First answer")
         self.assertEqual(second["answer"], "Second answer")
         self.launch.assert_called_once_with(
-            str(self.data_dir / "chatgpt-profile"),
+            self.data_dir / "chatgpt-profile",
             headless=True,
-            locale="ja-JP",
             timezone="Asia/Taipei",
         )
         self.context.new_page.assert_called_once_with()

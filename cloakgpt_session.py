@@ -17,8 +17,6 @@ from multiprocessing.connection import Client, Listener
 from pathlib import Path
 from typing import Any, Callable
 
-from cloakbrowser import launch_persistent_context
-
 from chatgpt_browser import (
     CHATGPT_URL,
     DEFAULT_DATA_DIR,
@@ -27,6 +25,7 @@ from chatgpt_browser import (
     DeliveryStateUnknownError,
     ReasoningLevel,
     _validate_conversation_url,
+    launch_chatgpt_context,
     send_message_on_page,
 )
 
@@ -162,10 +161,9 @@ class SessionBroker:
 
     def _ensure_context(self):
         if self.context is None:
-            self.context = launch_persistent_context(
-                str(self.profile_dir),
+            self.context = launch_chatgpt_context(
+                self.profile_dir,
                 headless=self.headless,
-                locale="ja-JP",
                 timezone=self.timezone,
             )
         return self.context

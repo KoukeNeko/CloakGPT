@@ -8,7 +8,6 @@ import subprocess
 import sys
 from collections.abc import Sequence
 
-from cloakbrowser import launch_persistent_context
 from cloakbrowser.__main__ import main as cloakbrowser_main
 from playwright._impl._driver import compute_driver_executable
 
@@ -17,6 +16,7 @@ from chatgpt_browser import (
     ChatGPTModel,
     DEFAULT_PROFILE_DIR,
     ReasoningLevel,
+    launch_chatgpt_context,
     start_conversation,
 )
 from cloakgpt_session import request_broker, run_broker
@@ -24,12 +24,6 @@ from cloakgpt_update import (
     consume_windows_update_result,
     update_cloakgpt,
     version_text,
-)
-
-
-EXISTING_BROWSER_SESSION_MARKERS = (
-    "Opening in existing browser session",
-    "既存のブラウザ セッションで開いています",
 )
 
 
@@ -54,14 +48,6 @@ def _configure_windows_utf8_stdio() -> None:
                 pass
 
 
-def _profile_already_open(error: Exception) -> bool:
-    message = str(error)
-    return (
-        "Target page, context or browser has been closed" in message
-        and any(marker in message for marker in EXISTING_BROWSER_SESSION_MARKERS)
-    )
-
-
 def _login_page(context):
     pages = list(context.pages)
     page = next(
@@ -79,21 +65,11 @@ def _login_page(context):
 
 def login(timezone: str) -> None:
     """Open the persistent browser profile for an interactive ChatGPT login."""
-    try:
-        context = launch_persistent_context(
-            str(DEFAULT_PROFILE_DIR),
-            headless=False,
-            locale="ja-JP",
-            timezone=timezone,
-        )
-    except Exception as error:
-        if _profile_already_open(error):
-            raise RuntimeError(
-                "the CloakGPT browser profile is already open. Close its "
-                "Chromium window; if a persistent session owns it, run "
-                "`cloakgpt daemon stop`; then retry `cloakgpt login`."
-            ) from None
-        raise
+    context = launch_chatgpt_context(
+        DEFAULT_PROFILE_DIR,
+        headless=False,
+        timezone=timezone,
+    )
     try:
         page = _login_page(context)
         page.goto(CHATGPT_URL, wait_until="domcontentloaded")

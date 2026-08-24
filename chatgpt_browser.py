@@ -26,6 +26,11 @@ REASONING_TRIGGER_SELECTOR = (
 ADVANCED_VIEW_SELECTOR = '[role="menuitem"][aria-label="詳細表示にする"]'
 REASONING_SUBMENU_ITEM_SELECTOR = '[role="menuitem"][aria-haspopup="menu"]'
 REASONING_OPTION_SELECTOR = '[role="menuitemradio"]'
+PROFILE_IN_USE_MARKERS = (
+    "exitCode=21",
+    "Opening in existing browser session",
+    "既存のブラウザ セッションで開いています",
+)
 
 
 class StringEnum(str, Enum):
@@ -43,6 +48,10 @@ class ReasoningLevel(StringEnum):
     FAST = "fast"
     MEDIUM = "medium"
     HIGH = "high"
+
+
+class ProfileInUseError(RuntimeError):
+    """Raised when Chromium cannot own CloakGPT's persistent profile."""
 
 
 MODEL_LABELS = {
@@ -98,6 +107,32 @@ DEFAULT_DATA_DIR = get_default_data_dir()
 DEFAULT_PROFILE_DIR = DEFAULT_DATA_DIR / "chatgpt-profile"
 
 StatusCallback = Callable[[str], None]
+
+
+def launch_chatgpt_context(
+    profile_dir: Path,
+    *,
+    headless: bool,
+    timezone: str,
+):
+    """Launch CloakGPT's profile and replace Chromium's noisy lock error."""
+    try:
+        return launch_persistent_context(
+            str(profile_dir),
+            headless=headless,
+            locale="ja-JP",
+            timezone=timezone,
+        )
+    except Exception as error:
+        message = str(error)
+        if any(marker in message for marker in PROFILE_IN_USE_MARKERS):
+            raise ProfileInUseError(
+                "the CloakGPT browser profile is already in use. Close any "
+                "CloakGPT Chromium window. If `cloakgpt daemon status` reports "
+                "a running daemon, reuse its known `--session` ID or run "
+                "`cloakgpt daemon stop`; then retry."
+            ) from None
+        raise
 
 
 @dataclass(frozen=True)
@@ -566,10 +601,9 @@ def _send_message(
     reasoning_level: ReasoningLevel | None,
     status_callback: StatusCallback | None,
 ) -> tuple[str, str]:
-    context = launch_persistent_context(
-        str(profile_dir),
+    context = launch_chatgpt_context(
+        profile_dir,
         headless=headless,
-        locale="ja-JP",
         timezone=timezone,
     )
     try:
