@@ -73,7 +73,10 @@ Remove-Item .\install.ps1
 
 The default destination is `%LOCALAPPDATA%\Programs\CloakGPT\cloakgpt.exe`.
 The installer adds that directory to the user `PATH`; open a new terminal after
-installation.
+installation. CloakGPT uses the current terminal for CLI input and output; its
+persistent-session daemon runs without opening a separate console window.
+Windows text I/O is set to UTF-8 even when the terminal initially uses Big5
+(code page 950).
 
 ## Install the agent skill (recommended)
 
