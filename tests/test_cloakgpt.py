@@ -77,6 +77,7 @@ class CloakGPTCliTests(unittest.TestCase):
         start_conversation.assert_called_once_with(
             "Hello",
             timezone="Asia/Taipei",
+            headless=True,
             model=cloakgpt.ChatGPTModel.GPT_5_5,
             reasoning_level=cloakgpt.ReasoningLevel.HIGH,
             status_callback=cloakgpt.show_status,
@@ -93,10 +94,18 @@ class CloakGPTCliTests(unittest.TestCase):
         continue_conversation.assert_called_once_with(
             "More details",
             timezone="Asia/Taipei",
+            headless=True,
             model=None,
             reasoning_level=None,
             status_callback=cloakgpt.show_status,
         )
+
+    @patch("cloakgpt.start_conversation", return_value="Visible answer")
+    def test_headed_option_shows_browser(self, start_conversation) -> None:
+        result = cloakgpt.main(["ask", "Hello", "--headed"])
+
+        self.assertEqual(result, 0)
+        self.assertFalse(start_conversation.call_args.kwargs["headless"])
 
     @patch("cloakgpt.start_conversation")
     def test_status_is_printed_to_stderr_only(self, start_conversation) -> None:

@@ -504,6 +504,7 @@ def _send_message(
     question: str,
     timezone: str,
     profile_dir: Path,
+    headless: bool,
     model: ChatGPTModel | None,
     reasoning_level: ReasoningLevel | None,
     status_callback: StatusCallback | None,
@@ -513,7 +514,7 @@ def _send_message(
     _emit_status(status_callback, "Opening ChatGPT...")
     context = launch_persistent_context(
         str(profile_dir),
-        headless=False,
+        headless=headless,
         locale="ja-JP",
         timezone=timezone,
     )
@@ -560,6 +561,7 @@ def start_conversation(
     question: str,
     *,
     timezone: str = "Asia/Taipei",
+    headless: bool = True,
     model: ChatGPTModel | None = None,
     reasoning_level: ReasoningLevel | None = None,
     status_callback: StatusCallback | None = None,
@@ -572,6 +574,7 @@ def start_conversation(
         question,
         timezone,
         profile_dir,
+        headless,
         model,
         reasoning_level,
         status_callback,
@@ -585,6 +588,7 @@ def continue_conversation(
     question: str,
     *,
     timezone: str = "Asia/Taipei",
+    headless: bool = True,
     model: ChatGPTModel | None = None,
     reasoning_level: ReasoningLevel | None = None,
     status_callback: StatusCallback | None = None,
@@ -602,6 +606,7 @@ def continue_conversation(
         question,
         timezone,
         profile_dir,
+        headless,
         model,
         reasoning_level,
         status_callback,

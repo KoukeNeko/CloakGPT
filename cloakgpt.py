@@ -52,6 +52,12 @@ def _add_shared_options(parser: argparse.ArgumentParser) -> None:
         choices=list(ReasoningLevel),
         help="reasoning level; omit to keep ChatGPT's current setting",
     )
+    parser.add_argument(
+        "--headed",
+        action="store_false",
+        dest="headless",
+        help="show the browser window (default: run headless)",
+    )
 
 
 def show_status(message: str) -> None:
@@ -128,6 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         answer = operation(
             args.question,
             timezone=args.timezone,
+            headless=args.headless,
             model=args.model,
             reasoning_level=args.reasoning,
             status_callback=show_status,

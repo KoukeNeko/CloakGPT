@@ -85,7 +85,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "chatgpt_browser.launch_persistent_context",
             return_value=self.context,
         )
-        self.launch_patch.start()
+        self.launch_context = self.launch_patch.start()
 
     def tearDown(self) -> None:
         self.launch_patch.stop()
@@ -118,6 +118,22 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.assertEqual(self.send_button.click.call_count, 2)
         self.model_option.click.assert_not_called()
         self.reasoning_option.click.assert_not_called()
+        self.assertTrue(
+            all(
+                call.kwargs["headless"]
+                for call in self.launch_context.call_args_list
+            )
+        )
+
+    def test_headed_conversation_shows_browser(self) -> None:
+        chatgpt_browser.start_conversation(
+            "Visible",
+            headless=False,
+            profile_dir=self.profile_dir,
+            state_file=self.state_file,
+        )
+
+        self.assertFalse(self.launch_context.call_args.kwargs["headless"])
 
     def test_selects_requested_model(self) -> None:
         chatgpt_browser.start_conversation(
