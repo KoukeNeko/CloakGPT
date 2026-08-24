@@ -32,6 +32,9 @@ jobs:
           - os: windows-2025
             target: windows-x86_64
             asset: cloakgpt-windows-x86_64.exe
+          - os: windows-11-arm
+            target: windows-arm64
+            asset: cloakgpt-windows-arm64.exe
 
     steps:
       - uses: actions/checkout@v6
