@@ -58,16 +58,14 @@ Use `--reasoning` with either `ask` or `continue`:
 .\.venv\Scripts\python.exe cloakgpt.py ask "Solve this carefully." --reasoning high
 ```
 
-Supported CLI values map to the current ChatGPT model picker labels:
+Supported CLI values map to the three reasoning options currently exposed by
+the advanced composer menu:
 
 | CLI value | ChatGPT label |
 | --- | --- |
-| `instant` | Instant |
-| `medium` | Medium |
-| `high` | High |
-| `extra-high` | Extra High |
-| `pro-standard` | Pro Standard |
-| `pro-extended` | Pro Extended |
+| `fast` | 最速 |
+| `medium` | 中程度 |
+| `high` | 高い |
 
 Omit `--reasoning` to keep ChatGPT's current selection. Availability depends
 on the signed-in account's plan and workspace settings. If a requested level

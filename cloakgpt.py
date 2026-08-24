@@ -9,7 +9,7 @@ from cloakbrowser import launch_persistent_context
 from chatgpt_browser import (
     CHATGPT_URL,
     DEFAULT_PROFILE_DIR,
-    REASONING_LEVEL_LABELS,
+    REASONING_LEVEL_INDEXES,
     continue_conversation,
     start_conversation,
 )
@@ -46,7 +46,7 @@ def _add_shared_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--reasoning",
-        choices=REASONING_LEVEL_LABELS,
+        choices=REASONING_LEVEL_INDEXES,
         help="reasoning level; omit to keep ChatGPT's current setting",
     )
 

@@ -14,25 +14,49 @@ class ChatGPTBrowserTests(unittest.TestCase):
 
         self.editor = Mock()
         self.send_button = Mock()
-        self.model_switcher = Mock()
-        self.model_menu = Mock()
-        self.model_option = Mock()
-        self.model_option.count.return_value = 1
-        self.model_menu.last = self.model_menu
-        self.model_menu.get_by_text.return_value = self.model_option
+        self.reasoning_trigger = Mock()
+        self.root_menu = Mock()
+        self.root_menu.first = self.root_menu
+        self.advanced_view = Mock()
+        self.advanced_view.count.return_value = 1
+        self.reasoning_item = Mock()
+        self.submenu_items = Mock()
+        self.submenu_items.count.return_value = 2
+        self.submenu_items.last = self.reasoning_item
+        self.root_menu.locator.side_effect = {
+            chatgpt_browser.ADVANCED_VIEW_SELECTOR: self.advanced_view,
+            chatgpt_browser.REASONING_SUBMENU_ITEM_SELECTOR: self.submenu_items,
+        }.get
+
+        self.reasoning_menu = Mock()
+        self.reasoning_menu.last = self.reasoning_menu
+        self.reasoning_option = Mock()
+        self.reasoning_option.inner_text.return_value = "高い"
+        self.reasoning_options = Mock()
+        self.reasoning_options.count.return_value = 3
+        self.reasoning_options.nth.return_value = self.reasoning_option
+        self.reasoning_menu.locator.return_value = self.reasoning_options
         self.responses = Mock()
         self.responses.count.return_value = 0
         self.responses.last.inner_text.return_value = "OK."
 
         self.page = Mock()
         self.page.url = "https://chatgpt.com/c/test-conversation"
-        self.page.locator.side_effect = {
+        locator_results = {
             chatgpt_browser.PROMPT_EDITOR_SELECTOR: self.editor,
             chatgpt_browser.SEND_BUTTON_SELECTOR: self.send_button,
             chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: self.responses,
-            chatgpt_browser.MODEL_SWITCHER_SELECTOR: self.model_switcher,
-            chatgpt_browser.MODEL_MENU_SELECTOR: self.model_menu,
-        }.get
+            chatgpt_browser.REASONING_TRIGGER_SELECTOR: self.reasoning_trigger,
+        }
+        visible_menus = [self.root_menu, self.reasoning_menu]
+
+        def locate(selector):
+            if selector == '[role="menu"]:visible':
+                return visible_menus.pop(0)
+            return locator_results.get(selector)
+
+        self.page.locator.side_effect = locate
+        self.reasoning_trigger.inner_text.return_value = "高い"
 
         self.context = Mock()
         self.context.new_page.return_value = self.page
@@ -80,21 +104,36 @@ class ChatGPTBrowserTests(unittest.TestCase):
             state_file=self.state_file,
         )
 
-        self.model_switcher.click.assert_called_once_with()
-        self.model_menu.get_by_text.assert_called_once_with("High", exact=True)
-        self.model_option.first.click.assert_called_once_with()
+        self.reasoning_trigger.click.assert_called_once_with()
+        self.advanced_view.click.assert_called_once_with()
+        self.reasoning_item.click.assert_called_once_with()
+        self.reasoning_options.nth.assert_called_once_with(2)
+        self.reasoning_option.click.assert_called_once_with()
 
     def test_reports_unavailable_reasoning_level(self) -> None:
-        self.model_option.count.return_value = 0
-        self.model_menu.inner_text.return_value = "Log in to select a model"
+        self.submenu_items.count.return_value = 0
+        self.root_menu.inner_text.return_value = "Log in to configure reasoning"
 
-        with self.assertRaisesRegex(ValueError, "Log in to select a model"):
+        with self.assertRaisesRegex(ValueError, "Log in to configure reasoning"):
             chatgpt_browser.start_conversation(
                 "Think",
-                reasoning_level="extra-high",
+                reasoning_level="high",
                 profile_dir=self.profile_dir,
                 state_file=self.state_file,
             )
+
+    def test_keeps_reasoning_level_when_already_selected(self) -> None:
+        self.reasoning_option.get_attribute.return_value = "true"
+
+        chatgpt_browser.start_conversation(
+            "Think",
+            reasoning_level="high",
+            profile_dir=self.profile_dir,
+            state_file=self.state_file,
+        )
+
+        self.reasoning_option.click.assert_not_called()
+        self.page.keyboard.press.assert_called_once_with("Escape")
 
     def test_rejects_invalid_saved_url(self) -> None:
         self.state_file.write_text("https://example.com/c/test", encoding="utf-8")

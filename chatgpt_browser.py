@@ -11,16 +11,17 @@ CHATGPT_URL = "https://chatgpt.com/"
 PROMPT_EDITOR_SELECTOR = "#prompt-textarea"
 SEND_BUTTON_SELECTOR = '[data-testid="send-button"]'
 ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]'
-MODEL_SWITCHER_SELECTOR = '[data-testid="model-switcher-dropdown-button"]'
-MODEL_MENU_SELECTOR = '[role="menu"]'
+REASONING_TRIGGER_SELECTOR = (
+    'form button[aria-haspopup="menu"]:not(#composer-plus-btn)'
+)
+ADVANCED_VIEW_SELECTOR = '[role="menuitem"][aria-label="詳細表示にする"]'
+REASONING_SUBMENU_ITEM_SELECTOR = '[role="menuitem"][aria-haspopup="menu"]'
+REASONING_OPTION_SELECTOR = '[role="menuitemradio"]'
 
-REASONING_LEVEL_LABELS = {
-    "instant": "Instant",
-    "medium": "Medium",
-    "high": "High",
-    "extra-high": "Extra High",
-    "pro-standard": "Pro Standard",
-    "pro-extended": "Pro Extended",
+REASONING_LEVEL_INDEXES = {
+    "fast": 0,
+    "medium": 1,
+    "high": 2,
 }
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -73,24 +74,50 @@ def _wait_for_reply(page, previous_count: int, timeout_seconds: int) -> str:
 
 def _set_reasoning_level(page, reasoning_level: str) -> None:
     try:
-        label = REASONING_LEVEL_LABELS[reasoning_level]
+        option_index = REASONING_LEVEL_INDEXES[reasoning_level]
     except KeyError as error:
-        choices = ", ".join(REASONING_LEVEL_LABELS)
+        choices = ", ".join(REASONING_LEVEL_INDEXES)
         raise ValueError(f"reasoning_level must be one of: {choices}") from error
 
-    switcher = page.locator(MODEL_SWITCHER_SELECTOR)
-    switcher.wait_for(state="visible", timeout=10_000)
-    switcher.click()
+    trigger = page.locator(REASONING_TRIGGER_SELECTOR)
+    trigger.wait_for(state="visible", timeout=10_000)
+    trigger.click()
 
-    menu = page.locator(MODEL_MENU_SELECTOR).last
-    menu.wait_for(state="visible", timeout=10_000)
-    option = menu.get_by_text(label, exact=True)
-    if option.count() == 0:
-        available = " ".join(menu.inner_text().split())
+    root_menu = page.locator('[role="menu"]:visible').first
+    root_menu.wait_for(state="visible", timeout=10_000)
+    advanced_view = root_menu.locator(ADVANCED_VIEW_SELECTOR)
+    if advanced_view.count():
+        advanced_view.click()
+
+    submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
+    if submenu_items.count() < 2:
+        available = " ".join(root_menu.inner_text().split())
+        raise ValueError(f"reasoning menu is unavailable; menu: {available}")
+
+    reasoning_item = submenu_items.last
+    reasoning_item.click()
+    reasoning_menu = page.locator('[role="menu"]:visible').last
+    options = reasoning_menu.locator(REASONING_OPTION_SELECTOR)
+    if options.count() <= option_index:
+        available = " ".join(reasoning_menu.inner_text().split())
         raise ValueError(
-            f"reasoning level {label!r} is unavailable; model menu: {available}"
+            f"reasoning level {reasoning_level!r} is unavailable; menu: {available}"
         )
-    option.first.click()
+
+    option = options.nth(option_index)
+    selected_label = option.inner_text().strip()
+    if option.get_attribute("aria-checked") == "true":
+        page.keyboard.press("Escape")
+        return
+
+    option.click()
+    deadline = monotonic() + 5
+    while monotonic() < deadline:
+        if trigger.inner_text().strip() == selected_label:
+            return
+        page.wait_for_timeout(100)
+    else:
+        raise RuntimeError("ChatGPT did not apply the selected reasoning level")
 
 
 def _send_message(
