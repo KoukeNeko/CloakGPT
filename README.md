@@ -152,6 +152,67 @@ cloakgpt ask "Reply only: OK." --headed
 `login` always uses a visible window so authentication can be completed
 interactively.
 
+## Persistent agent sessions
+
+For an agent that needs several turns, open one persistent session:
+
+```sh
+cloakgpt session open
+```
+
+The command prints a short MOTD to stderr and prints only the session ID to
+stdout. Keep that ID and use `ask` for every turn; a separate persistent
+`continue` command is unnecessary:
+
+```sh
+cloakgpt ask "First question" --session SESSION_ID
+cloakgpt ask "Follow-up question" --session SESSION_ID
+```
+
+The first message creates a ChatGPT conversation. Later messages reuse the same
+live page and browser context. Set `CLOAKGPT_SESSION_ID` to omit `--session`:
+
+```sh
+export CLOAKGPT_SESSION_ID=SESSION_ID
+cloakgpt ask "Another follow-up"
+```
+
+PowerShell equivalent:
+
+```powershell
+$env:CLOAKGPT_SESSION_ID = "SESSION_ID"
+cloakgpt ask "Another follow-up"
+```
+
+Persistent sessions are headless by default. Select a visible browser only when
+opening the session:
+
+```sh
+cloakgpt session open --headed
+```
+
+One daemon owns one persistent browser profile, so its headed/headless mode and
+timezone cannot change while it is running. Inspect and cleanly close state with:
+
+```sh
+cloakgpt session status SESSION_ID
+cloakgpt session close SESSION_ID
+cloakgpt daemon status
+cloakgpt daemon stop
+```
+
+The daemon must be stopped before `cloakgpt login` can open the same persistent
+profile. Stopping it preserves session IDs and conversation URLs; after login,
+the next session message starts the daemon and restores the conversation.
+
+The watchdog keeps an active page warm for two idle hours. After that it closes
+the page to release browser resources but retains the session ID and validated
+conversation URL, so the next `ask --session` restores the conversation. Set
+`CLOAKGPT_SESSION_TTL_SECONDS` to a positive number of seconds to change the
+lease. Browser failures before delivery are retried once on a reconstructed
+page; failures after the send click report `delivery state unknown` and are
+never automatically resent.
+
 Status is printed to stderr while only the final response is printed to stdout,
 so responses can be redirected or piped without status lines:
 
