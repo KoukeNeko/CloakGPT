@@ -73,14 +73,31 @@ class SessionBrokerTests(unittest.TestCase):
         self.assertIs(options["stdout"], log)
         self.assertIs(options["stderr"], log)
 
+    def test_open_session_does_not_launch_browser(self) -> None:
+        opened = self.open_session()
+
+        self.assertFalse(opened["warm"])
+        self.launch.assert_not_called()
+        self.context.new_page.assert_not_called()
+
     @patch("cloakgpt_session.send_message_on_page")
-    def test_reuses_one_context_and_page_for_multiple_messages(self, send) -> None:
+    def test_reopens_conversation_and_closes_browser_after_each_message(
+        self, send
+    ) -> None:
         opened = self.open_session()
         session_id = opened["session_id"]
+        first_page = Mock()
+        second_page = Mock()
+        first_context = Mock()
+        second_context = Mock()
+        first_context.new_page.return_value = first_page
+        second_context.new_page.return_value = second_page
+        self.launch.side_effect = [first_context, second_context]
         send.side_effect = [
             ("First answer", "https://chatgpt.com/c/test"),
             ("Second answer", "https://chatgpt.com/c/test"),
         ]
+        first_status = Mock()
 
         first = self.broker.send(
             {
@@ -89,7 +106,7 @@ class SessionBrokerTests(unittest.TestCase):
                 "model": None,
                 "reasoning": None,
             },
-            Mock(),
+            first_status,
         )
         second = self.broker.send(
             {
@@ -103,17 +120,22 @@ class SessionBrokerTests(unittest.TestCase):
 
         self.assertEqual(first["answer"], "First answer")
         self.assertEqual(second["answer"], "Second answer")
-        self.launch.assert_called_once_with(
-            self.data_dir / "chatgpt-profile",
-            headless=True,
-            timezone="Asia/Taipei",
+        self.assertEqual(self.launch.call_count, 2)
+        self.assertIs(send.call_args_list[0].args[0], first_page)
+        self.assertEqual(send.call_args_list[0].args[1], cloakgpt_session.CHATGPT_URL)
+        self.assertIs(send.call_args_list[1].args[0], second_page)
+        self.assertEqual(
+            send.call_args_list[1].args[1], "https://chatgpt.com/c/test"
         )
-        self.context.new_page.assert_called_once_with()
-        self.assertIs(send.call_args_list[0].args[0], self.page)
-        self.assertIs(send.call_args_list[1].args[0], self.page)
         self.assertTrue(send.call_args_list[0].kwargs["reuse_page"])
         self.assertTrue(send.call_args_list[1].kwargs["reuse_page"])
-        self.context.close.assert_not_called()
+        first_page.close.assert_called_once_with()
+        second_page.close.assert_called_once_with()
+        first_context.close.assert_called_once_with()
+        second_context.close.assert_called_once_with()
+        self.assertFalse(first["warm"])
+        self.assertFalse(second["warm"])
+        first_status.assert_any_call("Closing browser...")
 
     @patch("cloakgpt_session.send_message_on_page")
     def test_one_shot_closes_temporary_page_without_saving_session(self, send) -> None:
@@ -148,10 +170,8 @@ class SessionBrokerTests(unittest.TestCase):
         )
 
     @patch("cloakgpt_session.send_message_on_page")
-    def test_one_shot_preserves_existing_persistent_page(self, send) -> None:
+    def test_one_shot_preserves_cold_session_record(self, send) -> None:
         session_id = self.open_session()["session_id"]
-        temporary_page = Mock()
-        self.context.new_page.return_value = temporary_page
         send.return_value = ("One-shot answer", "https://chatgpt.com/c/temporary")
 
         result = self.broker.send_once(
@@ -165,17 +185,16 @@ class SessionBrokerTests(unittest.TestCase):
 
         self.assertEqual(result, {"answer": "One-shot answer"})
         self.assertIn(session_id, self.broker.sessions)
-        self.assertIs(self.broker.pages[session_id], self.page)
-        temporary_page.close.assert_called_once_with()
-        self.page.close.assert_not_called()
-        self.context.close.assert_not_called()
+        self.assertEqual(self.broker.pages, {})
+        self.page.close.assert_called_once_with()
+        self.context.close.assert_called_once_with()
 
     @patch("cloakgpt_session.send_message_on_page")
     def test_restarts_page_once_only_for_pre_delivery_failure(self, send) -> None:
         session_id = self.open_session()["session_id"]
         replacement = Mock()
         replacement.is_closed.return_value = False
-        self.context.new_page.side_effect = [replacement]
+        self.context.new_page.side_effect = [self.page, replacement]
         send.side_effect = [
             RuntimeError("page disconnected before click"),
             ("Recovered", "https://chatgpt.com/c/recovered"),
@@ -194,6 +213,9 @@ class SessionBrokerTests(unittest.TestCase):
         self.assertEqual(result["answer"], "Recovered")
         self.assertEqual(send.call_count, 2)
         self.page.close.assert_called_once_with()
+        replacement.close.assert_called_once_with()
+        self.context.close.assert_called_once_with()
+        self.assertFalse(result["warm"])
 
     @patch("cloakgpt_session.send_message_on_page")
     def test_never_retries_unknown_delivery(self, send) -> None:
@@ -217,6 +239,8 @@ class SessionBrokerTests(unittest.TestCase):
             )
 
         send.assert_called_once()
+        self.page.close.assert_called_once_with()
+        self.context.close.assert_called_once_with()
 
     def test_rejects_mode_and_timezone_changes(self) -> None:
         with self.assertRaisesRegex(ValueError, "headless mode"):
@@ -230,16 +254,17 @@ class SessionBrokerTests(unittest.TestCase):
                 Mock(),
             )
 
-    def test_close_session_closes_last_page_and_context(self) -> None:
+    def test_close_cold_session_does_not_launch_browser(self) -> None:
         session_id = self.open_session()["session_id"]
 
         result = self.broker.close_session(session_id)
 
         self.assertTrue(result["closed"])
-        self.page.close.assert_called_once_with()
-        self.context.close.assert_called_once_with()
+        self.launch.assert_not_called()
+        self.page.close.assert_not_called()
+        self.context.close.assert_not_called()
 
-    def test_watchdog_reaps_expired_session(self) -> None:
+    def test_watchdog_preserves_cold_session(self) -> None:
         session_id = self.open_session()["session_id"]
         self.broker.sessions[session_id]["conversation_url"] = (
             "https://chatgpt.com/c/restorable"
@@ -254,8 +279,9 @@ class SessionBrokerTests(unittest.TestCase):
             "https://chatgpt.com/c/restorable",
         )
         self.assertNotIn(session_id, self.broker.pages)
-        self.page.close.assert_called_once_with()
-        self.context.close.assert_called_once_with()
+        self.launch.assert_not_called()
+        self.page.close.assert_not_called()
+        self.context.close.assert_not_called()
 
     def test_restores_session_record_after_broker_restart(self) -> None:
         session_id = self.open_session()["session_id"]

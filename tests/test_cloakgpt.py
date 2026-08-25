@@ -256,7 +256,7 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(output.getvalue().strip(), "session-123")
         self.assertIn("persistent conversation ready", errors.getvalue())
-        self.assertIn("idle lease=120 minutes", errors.getvalue())
+        self.assertIn("Browser: on demand (headless)", errors.getvalue())
 
     @patch("cloakgpt.request_broker")
     def test_ask_with_session_uses_persistent_broker(self, request) -> None:

@@ -1,4 +1,4 @@
-"""Persistent local browser sessions for CloakGPT agents."""
+"""Persistent local conversation sessions for CloakGPT agents."""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def _pid_is_alive(pid: object) -> bool:
 
 
 class SessionBroker:
-    """Own one browser context and a page for every persistent session."""
+    """Persist conversation URLs and open a browser only while sending."""
 
     def __init__(
         self,
@@ -206,18 +206,7 @@ class SessionBroker:
 
         self._reap_stale()
         session_id = uuid.uuid4().hex
-        page = self._ensure_context().new_page()
-        self.pages[session_id] = page
-        try:
-            status("Opening ChatGPT...")
-            page.goto(CHATGPT_URL, wait_until="domcontentloaded")
-        except Exception:
-            self.pages.pop(session_id, None)
-            try:
-                page.close()
-            except Exception:
-                pass
-            raise
+        status("Creating persistent conversation ID...")
         now = time.time()
         self.sessions[session_id] = {
             "conversation_url": None,
@@ -251,25 +240,37 @@ class SessionBroker:
                 reuse_page=True,
             )
 
-        page = self._page_for(session_id)
         try:
-            answer, current_url = deliver(page)
-        except DeliveryStateUnknownError:
-            raise
-        except Exception:
-            status("Browser page failed before delivery; restarting it once...")
-            self.pages.pop(session_id, None)
-            try:
-                page.close()
-            except Exception:
-                pass
             page = self._page_for(session_id)
-            answer, current_url = deliver(page)
+            try:
+                answer, current_url = deliver(page)
+            except DeliveryStateUnknownError:
+                raise
+            except Exception:
+                status("Browser page failed before delivery; restarting it once...")
+                self.pages.pop(session_id, None)
+                try:
+                    page.close()
+                except Exception:
+                    pass
+                page = self._page_for(session_id)
+                answer, current_url = deliver(page)
 
-        _validate_conversation_url(current_url)
-        record["conversation_url"] = current_url
-        record["last_used"] = time.time()
-        self._save_state()
+            _validate_conversation_url(current_url)
+            record["conversation_url"] = current_url
+            record["last_used"] = time.time()
+            self._save_state()
+        finally:
+            page = self.pages.pop(session_id, None)
+            if page is not None or self.context is not None:
+                status("Closing browser...")
+            if page is not None:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+            if not self.pages:
+                self._close_context()
         return {"answer": answer, **self.session_status(session_id)}
 
     def send_once(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:

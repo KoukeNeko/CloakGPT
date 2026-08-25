@@ -272,7 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     session_open = session_commands.add_parser(
         "open",
-        help="open a persistent browser page and print its session ID",
+        help="create a persistent conversation ID",
     )
     session_open.add_argument(
         "--timezone",
@@ -340,12 +340,10 @@ def _required_session_id(value: str | None) -> str:
 def _print_session_motd(result: dict) -> None:
     session_id = result["session_id"]
     mode = "headless" if result["headless"] else "headed"
-    lease_minutes = int(result["ttl_seconds"]) // 60
     print("[session] CloakGPT persistent conversation ready", file=sys.stderr)
     print(f"[session] ID: {session_id}", file=sys.stderr)
     print(
-        f"[session] Browser: {mode}, timezone={result['timezone']}, "
-        f"idle lease={lease_minutes} minutes",
+        f"[session] Browser: on demand ({mode}), timezone={result['timezone']}",
         file=sys.stderr,
     )
     print(
