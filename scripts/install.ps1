@@ -105,11 +105,12 @@ if ([string]::IsNullOrWhiteSpace($Version) -or $Version -eq "latest") {
                 -Uri "https://api.github.com/repos/$repository/releases/latest" `
                 -Headers $apiHeaders
         } else {
-            $releases = @(Invoke-RestMethod `
+            $releases = Invoke-RestMethod `
                 -Uri "https://api.github.com/repos/$repository/releases?per_page=100" `
-                -Headers $apiHeaders)
+                -Headers $apiHeaders
             $release = $releases |
                 Where-Object { $_.prerelease -and -not $_.draft } |
+                Sort-Object -Property published_at -Descending |
                 Select-Object -First 1
         }
     } catch {

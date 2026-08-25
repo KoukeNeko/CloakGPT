@@ -105,13 +105,27 @@ if [ -z "$version" ]; then
                 sub(/.*"tag_name":[[:space:]]*"/, "", line)
                 sub(/".*/, "", line)
                 tag = line
+                draft = ""
+                prerelease = ""
             }
-            /"prerelease":[[:space:]]*true/ {
-                if (tag != "") {
-                    print tag
-                    exit
+            /"draft":[[:space:]]*/ {
+                draft = ($0 ~ /true/) ? "true" : "false"
+            }
+            /"prerelease":[[:space:]]*/ {
+                prerelease = ($0 ~ /true/) ? "true" : "false"
+            }
+            /"published_at":/ {
+                line = $0
+                sub(/.*"published_at":[[:space:]]*"/, "", line)
+                sub(/".*/, "", line)
+                if (tag != "" && prerelease == "true" && draft != "true") {
+                    if (best_tag == "" || line > best_published) {
+                        best_tag = tag
+                        best_published = line
+                    }
                 }
             }
+            END { print best_tag }
         ' "$temp_dir/release.json")
     fi
 

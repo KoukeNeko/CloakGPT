@@ -42,11 +42,38 @@ class CloakGPTUpdateTests(unittest.TestCase):
         self.assertIs(result, response)
         open_url.assert_called_once_with(request, timeout=30, context=context)
 
-    def test_selects_first_public_prerelease(self) -> None:
+    def test_selects_newest_published_prerelease_when_api_order_is_wrong(self) -> None:
         releases = [
-            {"tag_name": "draft", "prerelease": True, "draft": True},
-            {"tag_name": "v0.2.0-pre.1", "prerelease": True, "draft": False},
-            {"tag_name": "v0.1.0", "prerelease": False, "draft": False},
+            {
+                "tag_name": "v0.1.0-pre.9",
+                "prerelease": True,
+                "draft": False,
+                "published_at": "2026-08-25T06:37:26Z",
+            },
+            {
+                "tag_name": "v0.1.0-pre.8",
+                "prerelease": True,
+                "draft": False,
+                "published_at": "2026-08-25T05:56:31Z",
+            },
+            {
+                "tag_name": "v0.1.0-pre.10",
+                "prerelease": True,
+                "draft": False,
+                "published_at": "2026-08-25T07:12:39Z",
+            },
+            {
+                "tag_name": "draft",
+                "prerelease": True,
+                "draft": True,
+                "published_at": "2026-08-25T08:00:00Z",
+            },
+            {
+                "tag_name": "v0.2.0",
+                "prerelease": False,
+                "draft": False,
+                "published_at": "2026-08-25T09:00:00Z",
+            },
         ]
         with patch("cloakgpt_update._read_json", return_value=releases) as read:
             release = cloakgpt_update._release_for(
@@ -54,7 +81,7 @@ class CloakGPTUpdateTests(unittest.TestCase):
                 version=None,
             )
 
-        self.assertEqual(release["tag_name"], "v0.2.0-pre.1")
+        self.assertEqual(release["tag_name"], "v0.1.0-pre.10")
         read.assert_called_once_with(f"{cloakgpt_update.API_ROOT}?per_page=100")
 
     def test_exact_version_uses_tag_endpoint(self) -> None:

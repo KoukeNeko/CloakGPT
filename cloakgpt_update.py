@@ -81,13 +81,16 @@ def _release_for(*, channel: str | None, version: str | None) -> dict[str, Any]:
         release = _read_json(f"{API_ROOT}/latest")
     else:
         releases = _read_json(f"{API_ROOT}?per_page=100")
-        release = next(
+        release = max(
             (
                 item
                 for item in releases
                 if item.get("prerelease") and not item.get("draft")
             ),
-            None,
+            key=lambda item: str(
+                item.get("published_at") or item.get("created_at") or ""
+            ),
+            default=None,
         )
 
     if not isinstance(release, dict) or not release.get("tag_name"):
