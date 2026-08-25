@@ -159,6 +159,8 @@ jobs:
           if expected not in output or "${{ matrix.asset }}" not in output:
               raise SystemExit(f"unexpected build metadata: {output!r}")
       - name: Smoke test updater TLS
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: ./dist/${{ matrix.asset }} update --check --channel prerelease
       - name: Smoke test bundled Playwright driver
         run: ./dist/${{ matrix.asset }} _playwright_check

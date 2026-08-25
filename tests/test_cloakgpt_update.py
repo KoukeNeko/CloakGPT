@@ -10,6 +10,18 @@ import cloakgpt_update
 
 
 class CloakGPTUpdateTests(unittest.TestCase):
+    def test_github_token_authenticates_release_request(self) -> None:
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token"}, clear=True):
+            request = cloakgpt_update._request("https://api.github.test/releases")
+
+        self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
+
+    def test_release_request_is_anonymous_without_github_token(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            request = cloakgpt_update._request("https://api.github.test/releases")
+
+        self.assertIsNone(request.get_header("Authorization"))
+
     @patch("cloakgpt_update.certifi.where", return_value="bundled-ca.pem")
     def test_default_ca_bundle_comes_from_certifi(self, where) -> None:
         with patch.dict(os.environ, {}, clear=True):

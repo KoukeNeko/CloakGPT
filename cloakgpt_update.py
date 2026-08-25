@@ -35,13 +35,17 @@ def version_text() -> str:
 
 
 def _request(url: str) -> Request:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": f"CloakGPT/{VERSION}",
+        "X-GitHub-Api-Version": API_VERSION,
+    }
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     return Request(
         url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": f"CloakGPT/{VERSION}",
-            "X-GitHub-Api-Version": API_VERSION,
-        },
+        headers=headers,
     )
 
 
