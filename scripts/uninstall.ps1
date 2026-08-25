@@ -158,7 +158,7 @@ if ($null -eq $npxCommand) {
 }
 if ($null -ne $npxCommand) {
     try {
-        & $npxCommand.Source -y skills remove use-cloakgpt --global --agent "*" --yes
+        & $npxCommand.Source -y skills remove use-cloakgpt --global --yes
         if ($LASTEXITCODE -ne 0) {
             throw "Agent Skills CLI exited with code $LASTEXITCODE"
         }

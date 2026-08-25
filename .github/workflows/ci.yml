@@ -53,6 +53,7 @@ jobs:
           cache_dir="$test_root/cache"
           codex_home="$test_root/codex"
           fake_bin="$test_root/fake-bin"
+          npx_log="$test_root/npx.log"
           mkdir -p \
             "$install_dir" \
             "$data_dir" \
@@ -60,13 +61,18 @@ jobs:
             "$codex_home/skills/use-cloakgpt" \
             "$fake_bin"
           cp /usr/bin/true "$install_dir/cloakgpt"
-          cp /usr/bin/true "$fake_bin/npx"
+          cat > "$fake_bin/npx" <<'FAKE_NPX'
+          #!/bin/sh
+          printf '%s\n' "$*" >> "$CLOAKGPT_NPX_LOG"
+          FAKE_NPX
+          chmod +x "$fake_bin/npx"
 
           HOME="$test_home" \
           CLOAKGPT_INSTALL_DIR="$install_dir" \
           CLOAKGPT_DATA_DIR="$data_dir" \
           CLOAKBROWSER_CACHE_DIR="$cache_dir" \
           CODEX_HOME="$codex_home" \
+          CLOAKGPT_NPX_LOG="$npx_log" \
           PATH="$fake_bin:/usr/bin:/bin" \
             sh scripts/uninstall.sh --yes
 
@@ -74,6 +80,8 @@ jobs:
           test ! -e "$data_dir"
           test ! -e "$cache_dir"
           test ! -e "$codex_home/skills/use-cloakgpt"
+          grep -Fx -- '-y skills remove use-cloakgpt --global --yes' "$npx_log"
+          ! grep -F -- '--agent' "$npx_log"
       - name: Check PowerShell scripts
         if: runner.os == 'Windows'
         shell: pwsh
@@ -115,6 +123,7 @@ jobs:
             $cacheDir = Join-Path $tempRoot "cache"
             $codexHome = Join-Path $tempRoot "codex"
             $fakeBin = Join-Path $tempRoot "fake-bin"
+            $npxLog = Join-Path $tempRoot "npx.log"
             @(
               $installDir,
               $dataDir,
@@ -130,12 +139,16 @@ jobs:
             Set-Content `
               -LiteralPath (Join-Path $fakeBin "npx.cmd") `
               -Encoding Ascii `
-              -Value "@exit /b 0"
+              -Value @(
+                '@echo %*>>"%CLOAKGPT_NPX_LOG%"',
+                '@exit /b 0'
+              )
 
             $env:CLOAKGPT_INSTALL_DIR = $installDir
             $env:CLOAKGPT_DATA_DIR = $dataDir
             $env:CLOAKBROWSER_CACHE_DIR = $cacheDir
             $env:CODEX_HOME = $codexHome
+            $env:CLOAKGPT_NPX_LOG = $npxLog
             $env:PATH = "$fakeBin;$env:PATH"
             & .\scripts\uninstall.ps1 -Yes
 
@@ -148,6 +161,13 @@ jobs:
               if (Test-Path -LiteralPath $_) {
                 throw "Uninstaller left test artifact: $_"
               }
+            }
+            $npxCalls = @(Get-Content -LiteralPath $npxLog)
+            if ($npxCalls -notcontains "-y skills remove use-cloakgpt --global --yes") {
+              throw "Uninstaller used unexpected Agent Skills CLI arguments: $npxCalls"
+            }
+            if ($npxCalls -match "--agent") {
+              throw "Uninstaller passed unsupported --agent wildcard: $npxCalls"
             }
           } finally {
             if (Test-Path -LiteralPath $tempRoot) {

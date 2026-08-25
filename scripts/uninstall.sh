@@ -143,7 +143,7 @@ fi
 
 skill_cli_failed=false
 if command -v npx >/dev/null 2>&1; then
-    if npx -y skills remove use-cloakgpt --global --agent '*' --yes; then
+    if npx -y skills remove use-cloakgpt --global --yes; then
         echo "Removed use-cloakgpt through the Agent Skills CLI."
     else
         skill_cli_failed=true
