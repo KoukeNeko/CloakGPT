@@ -1,8 +1,10 @@
 """Browser automation core for a user-owned ChatGPT session."""
 
+import asyncio
 import os
 import platform
 import re
+from contextlib import asynccontextmanager
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
-from cloakbrowser import launch_persistent_context
+from cloakbrowser import launch_persistent_context, launch_persistent_context_async
 
 
 CHATGPT_URL = "https://chatgpt.com/"
@@ -109,6 +111,11 @@ DEFAULT_PROFILE_DIR = DEFAULT_DATA_DIR / "chatgpt-profile"
 StatusCallback = Callable[[str], None]
 
 
+@asynccontextmanager
+async def _without_composer_lock():
+    yield
+
+
 def launch_chatgpt_context(
     profile_dir: Path,
     *,
@@ -118,6 +125,32 @@ def launch_chatgpt_context(
     """Launch CloakGPT's profile and replace Chromium's noisy lock error."""
     try:
         return launch_persistent_context(
+            str(profile_dir),
+            headless=headless,
+            locale="ja-JP",
+            timezone=timezone,
+        )
+    except Exception as error:
+        message = str(error)
+        if any(marker in message for marker in PROFILE_IN_USE_MARKERS):
+            raise ProfileInUseError(
+                "the CloakGPT browser profile is already in use. Close any "
+                "CloakGPT Chromium window. If `cloakgpt daemon status` reports "
+                "a running daemon, reuse its known `--session` ID or run "
+                "`cloakgpt daemon stop`; then retry."
+            ) from None
+        raise
+
+
+async def launch_chatgpt_context_async(
+    profile_dir: Path,
+    *,
+    headless: bool,
+    timezone: str,
+):
+    """Launch CloakGPT's profile with the async Playwright API."""
+    try:
+        return await launch_persistent_context_async(
             str(profile_dir),
             headless=headless,
             locale="ja-JP",
@@ -358,58 +391,60 @@ def _format_response(markdown: str, sources: list[ChatGPTSource]) -> str:
     return f"{markdown.strip()}\n\n## Sources\n\n" + "\n".join(source_lines)
 
 
-def _extract_sources(page, response) -> list[ChatGPTSource]:
+async def _extract_sources(page, response) -> list[ChatGPTSource]:
     sources: list[ChatGPTSource] = []
     pills = response.locator(CITATION_PILL_SELECTOR)
-    for index in range(pills.count()):
+    for index in range(await pills.count()):
         pill = pills.nth(index)
         direct_links = pill.locator("a[href]")
-        if direct_links.count():
+        if await direct_links.count():
             direct_link = direct_links.first
             direct_source = _source_from_link(
-                direct_link.get_attribute("href"), direct_link.inner_text()
+                await direct_link.get_attribute("href"), await direct_link.inner_text()
             )
             if direct_source is not None:
                 sources.append(direct_source)
 
-        pill.hover(force=True, timeout=5_000)
-        page.wait_for_timeout(750)
+        await pill.hover(force=True, timeout=5_000)
+        await page.wait_for_timeout(750)
         popovers = page.locator(SOURCE_POPOVER_SELECTOR)
-        if not popovers.count():
+        if not await popovers.count():
             continue
         popover = popovers.first
-        counter = re.search(r"\b\d+/(\d+)\b", popover.inner_text())
+        counter = re.search(r"\b\d+/(\d+)\b", await popover.inner_text())
         source_count = int(counter.group(1)) if counter else 1
         for source_index in range(source_count):
             links = popover.locator("a[href]")
-            if not links.count():
+            if not await links.count():
                 break
             link = links.first
-            source = _source_from_link(link.get_attribute("href"), link.inner_text())
+            source = _source_from_link(
+                await link.get_attribute("href"), await link.inner_text()
+            )
             if source is not None:
                 sources.append(source)
             if source_index + 1 < source_count:
                 buttons = popover.locator("button")
-                if buttons.count() < 2:
+                if await buttons.count() < 2:
                     break
-                buttons.nth(1).click(force=True, timeout=5_000)
-                page.wait_for_timeout(300)
-        page.keyboard.press("Escape")
+                await buttons.nth(1).click(force=True, timeout=5_000)
+                await page.wait_for_timeout(300)
+        await page.keyboard.press("Escape")
     return sources
 
 
-def _extract_response(page) -> str:
+async def _extract_response(page) -> str:
     response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
-    markdown = response.evaluate(RENDER_MARKDOWN_SCRIPT)
-    return _format_response(markdown, _extract_sources(page, response))
+    markdown = await response.evaluate(RENDER_MARKDOWN_SCRIPT)
+    return _format_response(markdown, await _extract_sources(page, response))
 
 
-def _wait_for_reply(
+async def _wait_for_reply(
     page,
     previous_count: int,
     status_callback: StatusCallback | None,
 ) -> str:
-    page.wait_for_function(
+    await page.wait_for_function(
         """previousCount =>
         document.querySelectorAll('[data-message-author-role="assistant"]').length
         > previousCount""",
@@ -418,10 +453,10 @@ def _wait_for_reply(
     )
     _emit_status(status_callback, "ChatGPT is responding...")
     response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
-    turn_id = response.evaluate(TURN_ID_SCRIPT)
+    turn_id = await response.evaluate(TURN_ID_SCRIPT)
     previous_status = None
     while True:
-        state = page.evaluate(
+        state = await page.evaluate(
             RESPONSE_STATE_SCRIPT,
             {"previousCount": previous_count, "turnId": turn_id},
         )
@@ -431,41 +466,41 @@ def _wait_for_reply(
             previous_status = current_status
         if state["complete"]:
             break
-        page.wait_for_timeout(250)
+        await page.wait_for_timeout(250)
     _emit_status(status_callback, "Collecting response and sources...")
-    return _extract_response(page)
+    return await _extract_response(page)
 
 
-def _open_advanced_submenu(page, submenu_index: int, menu_name: str):
+async def _open_advanced_submenu(page, submenu_index: int, menu_name: str):
     trigger = page.locator(REASONING_TRIGGER_SELECTOR)
-    trigger.wait_for(state="visible", timeout=10_000)
-    trigger.click()
+    await trigger.wait_for(state="visible", timeout=10_000)
+    await trigger.click()
 
     root_menu = page.locator('[role="menu"]:visible').first
-    root_menu.wait_for(state="visible", timeout=10_000)
+    await root_menu.wait_for(state="visible", timeout=10_000)
     advanced_view = root_menu.locator(ADVANCED_VIEW_SELECTOR)
-    if advanced_view.count():
-        advanced_view.click()
+    if await advanced_view.count():
+        await advanced_view.click()
 
     submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
-    if submenu_items.count() <= submenu_index:
-        available = " ".join(root_menu.inner_text().split())
+    if await submenu_items.count() <= submenu_index:
+        available = " ".join((await root_menu.inner_text()).split())
         raise ValueError(f"{menu_name} menu is unavailable; menu: {available}")
 
-    submenu_items.nth(submenu_index).click()
+    await submenu_items.nth(submenu_index).click()
     submenu = page.locator('[role="menu"]:visible').last
     return trigger, submenu
 
 
-def _close_advanced_menus(page) -> None:
-    page.keyboard.press("Escape")
-    page.keyboard.press("Escape")
+async def _close_advanced_menus(page) -> None:
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Escape")
 
 
-def _read_page_status(page) -> ChatGPTPageStatus:
+async def _read_page_status(page) -> ChatGPTPageStatus:
     trigger = page.locator(REASONING_TRIGGER_SELECTOR)
-    trigger.wait_for(state="visible", timeout=10_000)
-    reasoning_text = trigger.inner_text().strip()
+    await trigger.wait_for(state="visible", timeout=10_000)
+    reasoning_text = (await trigger.inner_text()).strip()
     reasoning = next(
         (
             level.value
@@ -474,62 +509,62 @@ def _read_page_status(page) -> ChatGPTPageStatus:
         ),
         reasoning_text,
     )
-    trigger.click()
+    await trigger.click()
     try:
         root_menu = page.locator('[role="menu"]:visible').first
-        root_menu.wait_for(state="visible", timeout=10_000)
+        await root_menu.wait_for(state="visible", timeout=10_000)
         submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
-        if submenu_items.count() < 2:
-            available = " ".join(root_menu.inner_text().split())
+        if await submenu_items.count() < 2:
+            available = " ".join((await root_menu.inner_text()).split())
             raise ValueError(f"ChatGPT status is unavailable; menu: {available}")
 
-        model_text = " ".join(submenu_items.nth(0).inner_text().split())
+        model_text = " ".join((await submenu_items.nth(0).inner_text()).split())
         model = next(
             (label for label in MODEL_LABELS.values() if label in model_text),
             model_text,
         )
         return ChatGPTPageStatus(page.url, model, reasoning)
     finally:
-        page.keyboard.press("Escape")
+        await page.keyboard.press("Escape")
 
 
-def _set_model(page, model: ChatGPTModel) -> None:
+async def _set_model(page, model: ChatGPTModel) -> None:
     label = MODEL_LABELS[model]
-    _, model_menu = _open_advanced_submenu(page, 0, "model")
+    _, model_menu = await _open_advanced_submenu(page, 0, "model")
     options = model_menu.locator(REASONING_OPTION_SELECTOR)
     matches = options.filter(has_text=label)
-    if matches.count() != 1:
-        available = " ".join(model_menu.inner_text().split())
+    if await matches.count() != 1:
+        available = " ".join((await model_menu.inner_text()).split())
         raise ValueError(f"model {label!r} is unavailable; menu: {available}")
 
     option = matches.first
-    if option.get_attribute("aria-checked") == "true":
-        _close_advanced_menus(page)
+    if await option.get_attribute("aria-checked") == "true":
+        await _close_advanced_menus(page)
         return
-    option.click()
+    await option.click()
 
 
-def _set_reasoning_level(page, reasoning_level: ReasoningLevel) -> None:
+async def _set_reasoning_level(page, reasoning_level: ReasoningLevel) -> None:
     option_index = REASONING_LEVEL_INDEXES[reasoning_level]
-    trigger, reasoning_menu = _open_advanced_submenu(page, 1, "reasoning")
+    trigger, reasoning_menu = await _open_advanced_submenu(page, 1, "reasoning")
     options = reasoning_menu.locator(REASONING_OPTION_SELECTOR)
-    if options.count() <= option_index:
-        available = " ".join(reasoning_menu.inner_text().split())
+    if await options.count() <= option_index:
+        available = " ".join((await reasoning_menu.inner_text()).split())
         raise ValueError(
             f"reasoning level {reasoning_level!r} is unavailable; menu: {available}"
         )
 
     option = options.nth(option_index)
-    selected_label = option.inner_text().strip()
-    if option.get_attribute("aria-checked") == "true":
-        _close_advanced_menus(page)
+    selected_label = (await option.inner_text()).strip()
+    if await option.get_attribute("aria-checked") == "true":
+        await _close_advanced_menus(page)
         return
 
-    option.click()
+    await option.click()
     for _ in range(50):
-        if trigger.inner_text().strip() == selected_label:
+        if (await trigger.inner_text()).strip() == selected_label:
             return
-        page.wait_for_timeout(100)
+        await page.wait_for_timeout(100)
     raise RuntimeError("ChatGPT did not apply the selected reasoning level")
 
 
@@ -537,7 +572,7 @@ class DeliveryStateUnknownError(RuntimeError):
     """The prompt was clicked, but completion could not be confirmed."""
 
 
-def send_message_on_page(
+async def send_message_on_page(
     page,
     url: str,
     question: str,
@@ -546,39 +581,41 @@ def send_message_on_page(
     status_callback: StatusCallback | None,
     *,
     reuse_page: bool = False,
+    composer_lock=None,
 ) -> tuple[str, str]:
     _validate_question(question)
 
     _emit_status(status_callback, "Opening ChatGPT...")
     if not reuse_page or page.url != url:
-        page.goto(url, wait_until="domcontentloaded")
+        await page.goto(url, wait_until="domcontentloaded")
 
-    if model is not None:
-        _emit_status(status_callback, f"Selecting model: {model}")
-        _set_model(page, model)
-    if reasoning_level is not None:
-        _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
-        _set_reasoning_level(page, reasoning_level)
+    async with composer_lock or _without_composer_lock():
+        if model is not None:
+            _emit_status(status_callback, f"Selecting model: {model}")
+            await _set_model(page, model)
+        if reasoning_level is not None:
+            _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
+            await _set_reasoning_level(page, reasoning_level)
 
-    status = _read_page_status(page)
-    _emit_status(
-        status_callback,
-        f"Current page: model={status.model}, reasoning={status.reasoning}, url={status.url}",
-    )
+        status = await _read_page_status(page)
+        _emit_status(
+            status_callback,
+            f"Current page: model={status.model}, reasoning={status.reasoning}, url={status.url}",
+        )
 
-    editor = page.locator(PROMPT_EDITOR_SELECTOR)
-    editor.wait_for(state="visible", timeout=30_000)
-    previous_count = page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
-    editor.fill(question)
+        editor = page.locator(PROMPT_EDITOR_SELECTOR)
+        await editor.wait_for(state="visible", timeout=30_000)
+        previous_count = await page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
+        await editor.fill(question)
 
-    send_button = page.locator(SEND_BUTTON_SELECTOR)
-    send_button.wait_for(state="visible", timeout=10_000)
-    _emit_status(status_callback, "Sending message...")
-    send_button.click()
+        send_button = page.locator(SEND_BUTTON_SELECTOR)
+        await send_button.wait_for(state="visible", timeout=10_000)
+        _emit_status(status_callback, "Sending message...")
+        await send_button.click()
 
     try:
         _emit_status(status_callback, "Waiting for ChatGPT response (Ctrl+C to stop)...")
-        answer = _wait_for_reply(
+        answer = await _wait_for_reply(
             page,
             previous_count,
             status_callback,
@@ -591,7 +628,7 @@ def send_message_on_page(
         ) from error
 
 
-def _send_message(
+async def _send_message(
     url: str,
     question: str,
     timezone: str,
@@ -601,14 +638,14 @@ def _send_message(
     reasoning_level: ReasoningLevel | None,
     status_callback: StatusCallback | None,
 ) -> tuple[str, str]:
-    context = launch_chatgpt_context(
+    context = await launch_chatgpt_context_async(
         profile_dir,
         headless=headless,
         timezone=timezone,
     )
     try:
-        page = context.new_page()
-        return send_message_on_page(
+        page = await context.new_page()
+        return await send_message_on_page(
             page,
             url,
             question,
@@ -617,7 +654,7 @@ def _send_message(
             status_callback,
         )
     finally:
-        context.close()
+        await context.close()
 
 
 def start_conversation(
@@ -631,14 +668,16 @@ def start_conversation(
     profile_dir: Path = DEFAULT_PROFILE_DIR,
 ) -> str:
     """Start a new ChatGPT conversation and return the response text."""
-    answer, _ = _send_message(
-        CHATGPT_URL,
-        question,
-        timezone,
-        profile_dir,
-        headless,
-        model,
-        reasoning_level,
-        status_callback,
+    answer, _ = asyncio.run(
+        _send_message(
+            CHATGPT_URL,
+            question,
+            timezone,
+            profile_dir,
+            headless,
+            model,
+            reasoning_level,
+            status_callback,
+        )
     )
     return answer

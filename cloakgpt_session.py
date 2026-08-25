@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import os
-import queue
 import subprocess
 import sys
 import tempfile
@@ -25,7 +25,7 @@ from chatgpt_browser import (
     DeliveryStateUnknownError,
     ReasoningLevel,
     _validate_conversation_url,
-    launch_chatgpt_context,
+    launch_chatgpt_context_async,
     send_message_on_page,
 )
 
@@ -114,7 +114,7 @@ def _pid_is_alive(pid: object) -> bool:
 
 
 class SessionBroker:
-    """Persist conversation URLs and open a browser only while sending."""
+    """Persist conversation URLs and run different sessions concurrently."""
 
     def __init__(
         self,
@@ -132,7 +132,14 @@ class SessionBroker:
         self.context = None
         self.pages: dict[str, Any] = {}
         self.sessions: dict[str, dict[str, Any]] = {}
+        self._context_lock = asyncio.Lock()
+        self._composer_lock = asyncio.Lock()
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._inflight_jobs: dict[str, str | None] = {}
+        self._jobs_done = asyncio.Event()
+        self._jobs_done.set()
         self.running = True
+        self.draining = False
         self._load_state()
 
     def _load_state(self) -> None:
@@ -151,7 +158,7 @@ class SessionBroker:
         _write_json(
             _state_path(self.data_dir),
             {
-                "version": 1,
+                "version": 2,
                 "headless": self.headless,
                 "timezone": self.timezone,
                 "ttl_seconds": self.ttl_seconds,
@@ -159,37 +166,82 @@ class SessionBroker:
             },
         )
 
-    def _ensure_context(self):
-        if self.context is None:
-            self.context = launch_chatgpt_context(
-                self.profile_dir,
-                headless=self.headless,
-                timezone=self.timezone,
-            )
-        return self.context
+    async def _ensure_context(self):
+        async with self._context_lock:
+            if self.context is None:
+                context = await launch_chatgpt_context_async(
+                    self.profile_dir,
+                    headless=self.headless,
+                    timezone=self.timezone,
+                )
+                self.context = context
+                for page in list(context.pages):
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
+            return self.context
 
-    def _close_context(self) -> None:
-        context, self.context = self.context, None
-        self.pages.clear()
-        if context is not None:
+    async def _close_context_if_idle(
+        self,
+        status: StatusCallback | None = None,
+        *,
+        force: bool = False,
+    ) -> None:
+        async with self._context_lock:
+            if not force and self._inflight_jobs:
+                return
+            context, self.context = self.context, None
+            if context is None:
+                return
+            if status is not None:
+                status("Closing browser...")
             try:
-                context.close()
+                await context.close()
             except Exception:
                 pass
 
-    def _page_for(self, session_id: str):
-        record = self.sessions.get(session_id)
-        if record is None:
-            raise ValueError(f"unknown session: {session_id}")
-        page = self.pages.get(session_id)
-        if page is None or page.is_closed():
-            try:
-                page = self._ensure_context().new_page()
-            except Exception:
-                self._close_context()
-                page = self._ensure_context().new_page()
-            self.pages[session_id] = page
+    async def _new_page(self, request_id: str):
+        context = await self._ensure_context()
+        try:
+            page = await context.new_page()
+        except Exception:
+            async with self._context_lock:
+                if self.context is not context or self.pages:
+                    raise
+                self.context = None
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+            context = await self._ensure_context()
+            page = await context.new_page()
+        self.pages[request_id] = page
         return page
+
+    async def _close_page(self, request_id: str) -> None:
+        page = self.pages.pop(request_id, None)
+        if page is not None:
+            try:
+                await page.close()
+            except Exception:
+                pass
+
+    def _begin_job(self, session_id: str | None) -> str:
+        if self.draining:
+            raise RuntimeError("CloakGPT daemon is stopping")
+        request_id = uuid.uuid4().hex
+        self._inflight_jobs[request_id] = session_id
+        self._jobs_done.clear()
+        return request_id
+
+    async def _finish_job(self, request_id: str, status: StatusCallback) -> None:
+        await self._close_page(request_id)
+        self._inflight_jobs.pop(request_id, None)
+        if not self._inflight_jobs:
+            await self._close_context_if_idle(status)
+            if not self._inflight_jobs:
+                self._jobs_done.set()
 
     def open_session(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:
         requested_headless = bool(request["headless"])
@@ -216,74 +268,77 @@ class SessionBroker:
         self._save_state()
         return self.session_status(session_id)
 
-    def send(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:
+    async def send(
+        self, request: dict[str, Any], status: StatusCallback
+    ) -> dict[str, Any]:
         self._reap_stale()
         session_id = str(request["session_id"])
-        record = self.sessions.get(session_id)
-        if record is None:
+        if session_id not in self.sessions:
             raise ValueError(f"unknown session: {session_id}")
-
-        url = record.get("conversation_url") or CHATGPT_URL
-        model = ChatGPTModel(request["model"]) if request.get("model") else None
-        reasoning = (
-            ReasoningLevel(request["reasoning"]) if request.get("reasoning") else None
-        )
-
-        def deliver(page):
-            return send_message_on_page(
-                page,
-                url,
-                str(request["question"]),
-                model,
-                reasoning,
-                status,
-                reuse_page=True,
-            )
-
+        request_id = self._begin_job(session_id)
+        session_lock = self._session_locks.setdefault(session_id, asyncio.Lock())
         try:
-            page = self._page_for(session_id)
-            try:
-                answer, current_url = deliver(page)
-            except DeliveryStateUnknownError:
-                raise
-            except Exception:
-                status("Browser page failed before delivery; restarting it once...")
-                self.pages.pop(session_id, None)
-                try:
-                    page.close()
-                except Exception:
-                    pass
-                page = self._page_for(session_id)
-                answer, current_url = deliver(page)
+            if session_lock.locked():
+                status("Waiting for an earlier message in this session...")
+            async with session_lock:
+                record = self.sessions.get(session_id)
+                if record is None:
+                    raise ValueError(f"unknown session: {session_id}")
+                url = record.get("conversation_url") or CHATGPT_URL
+                model = (
+                    ChatGPTModel(request["model"]) if request.get("model") else None
+                )
+                reasoning = (
+                    ReasoningLevel(request["reasoning"])
+                    if request.get("reasoning")
+                    else None
+                )
 
-            _validate_conversation_url(current_url)
-            record["conversation_url"] = current_url
-            record["last_used"] = time.time()
-            self._save_state()
-        finally:
-            page = self.pages.pop(session_id, None)
-            if page is not None or self.context is not None:
-                status("Closing browser...")
-            if page is not None:
+                async def deliver(page):
+                    return await send_message_on_page(
+                        page,
+                        url,
+                        str(request["question"]),
+                        model,
+                        reasoning,
+                        status,
+                        reuse_page=True,
+                        composer_lock=self._composer_lock,
+                    )
+
+                page = await self._new_page(request_id)
                 try:
-                    page.close()
+                    answer, current_url = await deliver(page)
+                except DeliveryStateUnknownError:
+                    raise
                 except Exception:
-                    pass
-            if not self.pages:
-                self._close_context()
+                    status("Browser page failed before delivery; restarting it once...")
+                    await self._close_page(request_id)
+                    page = await self._new_page(request_id)
+                    answer, current_url = await deliver(page)
+
+                _validate_conversation_url(current_url)
+                record["conversation_url"] = current_url
+                record["last_used"] = time.time()
+                self._save_state()
+        finally:
+            await self._finish_job(request_id, status)
         return {"answer": answer, **self.session_status(session_id)}
 
-    def send_once(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:
+    async def send_once(
+        self, request: dict[str, Any], status: StatusCallback
+    ) -> dict[str, Any]:
         """Send a new conversation through the daemon without saving a session."""
         self._reap_stale()
+        request_id = self._begin_job(None)
         status("Opening a temporary new conversation...")
         model = ChatGPTModel(request["model"]) if request.get("model") else None
         reasoning = (
             ReasoningLevel(request["reasoning"]) if request.get("reasoning") else None
         )
-        page = self._ensure_context().new_page()
         try:
-            answer, _ = send_message_on_page(
+            page = await self._new_page(request_id)
+            answer, _ = await send_message_on_page(
                 page,
                 CHATGPT_URL,
                 str(request["question"]),
@@ -291,20 +346,22 @@ class SessionBroker:
                 reasoning,
                 status,
                 reuse_page=True,
+                composer_lock=self._composer_lock,
             )
             return {"answer": answer}
         finally:
-            try:
-                page.close()
-            except Exception:
-                pass
-            if not self.pages:
-                self._close_context()
+            await self._finish_job(request_id, status)
 
     def session_status(self, session_id: str) -> dict[str, Any]:
         record = self.sessions.get(session_id)
         if record is None:
             raise ValueError(f"unknown session: {session_id}")
+        jobs = [
+            request_id
+            for request_id, job_session_id in self._inflight_jobs.items()
+            if job_session_id == session_id
+        ]
+        running = sum(request_id in self.pages for request_id in jobs)
         return {
             "session_id": session_id,
             "headless": self.headless,
@@ -313,44 +370,28 @@ class SessionBroker:
             "conversation_url": record.get("conversation_url"),
             "created_at": record.get("created_at"),
             "last_used": record.get("last_used"),
-            "warm": session_id in self.pages,
+            "warm": running > 0,
+            "running_requests": running,
+            "queued_requests": len(jobs) - running,
         }
 
     def close_session(self, session_id: str) -> dict[str, Any]:
         if session_id not in self.sessions:
             raise ValueError(f"unknown session: {session_id}")
-        page = self.pages.pop(session_id, None)
-        if page is not None:
-            try:
-                page.close()
-            except Exception:
-                pass
+        if session_id in self._inflight_jobs.values():
+            raise RuntimeError(f"session is busy: {session_id}")
         del self.sessions[session_id]
+        self._session_locks.pop(session_id, None)
         self._save_state()
-        if not self.sessions:
-            self._close_context()
         return {"session_id": session_id, "closed": True}
 
     def _reap_stale(self) -> None:
-        cutoff = time.time() - self.ttl_seconds
-        expired = [
-            session_id
-            for session_id, record in self.sessions.items()
-            if session_id in self.pages
-            and float(record.get("last_used", 0)) < cutoff
-        ]
-        for session_id in expired:
-            page = self.pages.pop(session_id, None)
-            if page is not None:
-                try:
-                    page.close()
-                except Exception:
-                    pass
-        if expired:
-            if not self.pages:
-                self._close_context()
+        # Conversation records stay cold on disk; active requests own their pages.
+        return
 
-    def dispatch(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:
+    async def dispatch(
+        self, request: dict[str, Any], status: StatusCallback
+    ) -> dict[str, Any]:
         operation = request.get("operation")
         if operation == "ping":
             return {
@@ -359,24 +400,35 @@ class SessionBroker:
                 "timezone": self.timezone,
                 "ttl_seconds": self.ttl_seconds,
                 "sessions": len(self.sessions),
+                "browser": "running" if self.context is not None else "stopped",
+                "active_requests": len(self.pages),
+                "queued_requests": len(self._inflight_jobs) - len(self.pages),
+                "open_pages": len(self.pages),
             }
+        if operation == "stop":
+            self.draining = True
+            self.running = False
+            await self._jobs_done.wait()
+            await self._close_context_if_idle(force=True)
+            return {"stopped": True}
+        if self.draining:
+            raise RuntimeError("CloakGPT daemon is stopping")
         if operation == "open":
             return self.open_session(request, status)
         if operation == "send":
-            return self.send(request, status)
+            return await self.send(request, status)
         if operation == "send_once":
-            return self.send_once(request, status)
+            return await self.send_once(request, status)
         if operation == "session_status":
             return self.session_status(str(request["session_id"]))
         if operation == "close":
             return self.close_session(str(request["session_id"]))
-        if operation == "stop":
-            self.running = False
-            return {"stopped": True}
         raise ValueError(f"unknown broker operation: {operation}")
 
-    def close(self) -> None:
-        self._close_context()
+    async def close(self) -> None:
+        self.draining = True
+        await self._jobs_done.wait()
+        await self._close_context_if_idle(force=True)
 
 
 def _send_event(connection, event: dict[str, Any]) -> None:
@@ -386,7 +438,7 @@ def _send_event(connection, event: dict[str, Any]) -> None:
         pass
 
 
-def run_broker(*, data_dir: Path, headless: bool, timezone: str) -> int:
+async def _run_broker_async(*, data_dir: Path, headless: bool, timezone: str) -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
     family, address = _endpoint(data_dir)
     if family == "AF_UNIX":
@@ -412,46 +464,78 @@ def run_broker(*, data_dir: Path, headless: bool, timezone: str) -> int:
         },
     )
 
-    connections: queue.Queue[Any] = queue.Queue()
+    connections: asyncio.Queue[Any] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
 
     def accept_connections() -> None:
         while broker.running:
             try:
-                connections.put(listener.accept())
+                connection = listener.accept()
+                loop.call_soon_threadsafe(connections.put_nowait, connection)
             except (OSError, EOFError):
                 return
 
     accept_thread = threading.Thread(target=accept_connections, daemon=True)
     accept_thread.start()
+
+    async def write_events(connection, events: asyncio.Queue[Any]) -> None:
+        while True:
+            event = await events.get()
+            if event is None:
+                return
+            await asyncio.to_thread(_send_event, connection, event)
+
+    async def handle_connection(connection) -> None:
+        events: asyncio.Queue[Any] = asyncio.Queue()
+        writer = asyncio.create_task(write_events(connection, events))
+        try:
+            request = await asyncio.to_thread(connection.recv)
+            if not isinstance(request, dict):
+                raise ValueError("invalid broker request")
+            result = await broker.dispatch(
+                request,
+                lambda message: events.put_nowait(
+                    {"type": "status", "message": message}
+                ),
+            )
+            events.put_nowait({"type": "result", "result": result})
+        except Exception as error:
+            events.put_nowait({"type": "error", "message": str(error)})
+        finally:
+            events.put_nowait(None)
+            await writer
+            connection.close()
+
+    tasks: set[asyncio.Task[Any]] = set()
     try:
         while broker.running:
             broker._reap_stale()
             try:
-                connection = connections.get(timeout=1)
-            except queue.Empty:
+                connection = await asyncio.wait_for(connections.get(), timeout=1)
+            except TimeoutError:
                 continue
-            try:
-                request = connection.recv()
-                if not isinstance(request, dict):
-                    raise ValueError("invalid broker request")
-                result = broker.dispatch(
-                    request,
-                    lambda message: _send_event(
-                        connection, {"type": "status", "message": message}
-                    ),
-                )
-                _send_event(connection, {"type": "result", "result": result})
-            except Exception as error:
-                _send_event(connection, {"type": "error", "message": str(error)})
-            finally:
-                connection.close()
+            task = asyncio.create_task(handle_connection(connection))
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
     finally:
-        broker.close()
         listener.close()
+        while not connections.empty():
+            connection = connections.get_nowait()
+            task = asyncio.create_task(handle_connection(connection))
+            tasks.add(task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await broker.close()
         _remove_file(_metadata_path(data_dir))
         if family == "AF_UNIX":
             _remove_file(Path(address))
     return 0
+
+
+def run_broker(*, data_dir: Path, headless: bool, timezone: str) -> int:
+    return asyncio.run(
+        _run_broker_async(data_dir=data_dir, headless=headless, timezone=timezone)
+    )
 
 
 def _load_metadata(data_dir: Path) -> dict[str, Any] | None:

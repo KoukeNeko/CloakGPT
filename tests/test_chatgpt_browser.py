@@ -1,7 +1,8 @@
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import chatgpt_browser
 
@@ -12,17 +13,29 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.profile_dir = Path(self.temp_dir.name) / "profile"
 
         self.editor = Mock()
+        self.editor.wait_for = AsyncMock()
+        self.editor.fill = AsyncMock()
         self.send_button = Mock()
+        self.send_button.wait_for = AsyncMock()
+        self.send_button.click = AsyncMock()
         self.reasoning_trigger = Mock()
+        self.reasoning_trigger.wait_for = AsyncMock()
+        self.reasoning_trigger.click = AsyncMock()
+        self.reasoning_trigger.inner_text = AsyncMock(return_value="高い")
         self.root_menu = Mock()
         self.root_menu.first = self.root_menu
+        self.root_menu.wait_for = AsyncMock()
+        self.root_menu.inner_text = AsyncMock()
         self.advanced_view = Mock()
-        self.advanced_view.count.return_value = 1
+        self.advanced_view.count = AsyncMock(return_value=1)
+        self.advanced_view.click = AsyncMock()
         self.model_item = Mock()
-        self.model_item.inner_text.return_value = "模型 GPT-5.6 Sol"
+        self.model_item.inner_text = AsyncMock(return_value="模型 GPT-5.6 Sol")
+        self.model_item.click = AsyncMock()
         self.reasoning_item = Mock()
+        self.reasoning_item.click = AsyncMock()
         self.submenu_items = Mock()
-        self.submenu_items.count.return_value = 2
+        self.submenu_items.count = AsyncMock(return_value=2)
         self.submenu_items.nth.side_effect = (
             lambda index: [self.model_item, self.reasoning_item][index]
         )
@@ -34,31 +47,42 @@ class ChatGPTBrowserTests(unittest.TestCase):
 
         self.reasoning_menu = Mock()
         self.reasoning_menu.last = self.reasoning_menu
+        self.reasoning_menu.inner_text = AsyncMock()
         self.reasoning_option = Mock()
-        self.reasoning_option.inner_text.return_value = "高い"
+        self.reasoning_option.inner_text = AsyncMock(return_value="高い")
+        self.reasoning_option.get_attribute = AsyncMock(return_value=None)
+        self.reasoning_option.click = AsyncMock()
         self.reasoning_options = Mock()
-        self.reasoning_options.count.return_value = 3
+        self.reasoning_options.count = AsyncMock(return_value=3)
         self.reasoning_options.nth.return_value = self.reasoning_option
         self.model_option = Mock()
+        self.model_option.get_attribute = AsyncMock(return_value=None)
+        self.model_option.click = AsyncMock()
         self.model_match = Mock()
-        self.model_match.count.return_value = 1
+        self.model_match.count = AsyncMock(return_value=1)
         self.model_match.first = self.model_option
         self.reasoning_options.filter.return_value = self.model_match
         self.reasoning_menu.locator.return_value = self.reasoning_options
         self.responses = Mock()
-        self.responses.count.return_value = 0
-        self.responses.last.inner_text.return_value = "OK."
-        self.responses.last.evaluate.side_effect = lambda script: (
+        self.responses.count = AsyncMock(return_value=0)
+        self.responses.last.evaluate = AsyncMock(side_effect=lambda script: (
             "conversation-turn-2"
             if script == chatgpt_browser.TURN_ID_SCRIPT
             else "OK."
-        )
+        ))
         self.citation_pills = Mock()
-        self.citation_pills.count.return_value = 0
+        self.citation_pills.count = AsyncMock(return_value=0)
         self.responses.last.locator.return_value = self.citation_pills
 
         self.page = Mock()
         self.page.url = "https://chatgpt.com/c/test-conversation"
+        self.page.goto = AsyncMock()
+        self.page.evaluate = AsyncMock(
+            return_value={"complete": True, "status": None}
+        )
+        self.page.wait_for_function = AsyncMock()
+        self.page.wait_for_timeout = AsyncMock()
+        self.page.keyboard.press = AsyncMock()
         locator_results = {
             chatgpt_browser.PROMPT_EDITOR_SELECTOR: self.editor,
             chatgpt_browser.SEND_BUTTON_SELECTOR: self.send_button,
@@ -75,16 +99,16 @@ class ChatGPTBrowserTests(unittest.TestCase):
             return locator_results.get(selector)
 
         self.page.locator.side_effect = locate
-        self.page.evaluate.return_value = {"complete": True, "status": None}
-        self.reasoning_trigger.inner_text.return_value = "高い"
 
         self.context = Mock()
-        self.context.new_page.return_value = self.page
+        self.context.new_page = AsyncMock(return_value=self.page)
+        self.context.close = AsyncMock()
         self.launch_patch = patch(
-            "chatgpt_browser.launch_persistent_context",
-            return_value=self.context,
+            "chatgpt_browser.launch_persistent_context_async",
+            new_callable=AsyncMock,
         )
         self.launch_context = self.launch_patch.start()
+        self.launch_context.return_value = self.context
 
     def tearDown(self) -> None:
         self.launch_patch.stop()
@@ -245,10 +269,90 @@ class ChatGPTBrowserTests(unittest.TestCase):
         status_callback.assert_any_call("ChatGPT activity: 13s考えました")
         self.assertEqual(self.page.wait_for_timeout.call_count, 3)
 
+    def test_composer_lock_does_not_serialize_response_generation(self) -> None:
+        async def exercise() -> None:
+            second_editor = Mock()
+            second_editor.wait_for = AsyncMock()
+            second_editor.fill = AsyncMock()
+            second_button = Mock()
+            second_button.wait_for = AsyncMock()
+            second_button.click = AsyncMock()
+            second_responses = Mock()
+            second_responses.count = AsyncMock(return_value=0)
+            second_page = Mock()
+            second_page.url = self.page.url
+            second_page.locator.side_effect = {
+                chatgpt_browser.PROMPT_EDITOR_SELECTOR: second_editor,
+                chatgpt_browser.SEND_BUTTON_SELECTOR: second_button,
+                chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: second_responses,
+            }.get
+
+            entered = 0
+            both_waiting = asyncio.Event()
+            release = asyncio.Event()
+
+            async def wait_for_reply(*args, **kwargs):
+                nonlocal entered
+                entered += 1
+                if entered == 2:
+                    both_waiting.set()
+                await release.wait()
+                return "OK."
+
+            lock = asyncio.Lock()
+            status = chatgpt_browser.ChatGPTPageStatus(
+                self.page.url, "GPT-5.6 Sol", "high"
+            )
+            with (
+                patch(
+                    "chatgpt_browser._read_page_status",
+                    new_callable=AsyncMock,
+                    return_value=status,
+                ),
+                patch(
+                    "chatgpt_browser._wait_for_reply",
+                    new_callable=AsyncMock,
+                    side_effect=wait_for_reply,
+                ),
+            ):
+                first = asyncio.create_task(
+                    chatgpt_browser.send_message_on_page(
+                        self.page,
+                        self.page.url,
+                        "First",
+                        None,
+                        None,
+                        None,
+                        reuse_page=True,
+                        composer_lock=lock,
+                    )
+                )
+                second = asyncio.create_task(
+                    chatgpt_browser.send_message_on_page(
+                        second_page,
+                        second_page.url,
+                        "Second",
+                        None,
+                        None,
+                        None,
+                        reuse_page=True,
+                        composer_lock=lock,
+                    )
+                )
+
+                await asyncio.wait_for(both_waiting.wait(), timeout=1)
+                self.send_button.click.assert_awaited_once_with()
+                second_button.click.assert_awaited_once_with()
+                release.set()
+                await asyncio.gather(first, second)
+
+        asyncio.run(exercise())
+
     def test_does_not_hide_unknown_delivery_after_send_click(self) -> None:
         with (
             patch(
                 "chatgpt_browser._wait_for_reply",
+                new_callable=AsyncMock,
                 side_effect=RuntimeError("page disconnected"),
             ),
             self.assertRaisesRegex(
@@ -306,21 +410,23 @@ class ChatGPTBrowserTests(unittest.TestCase):
     def test_extracts_direct_source_when_popover_is_unavailable(self) -> None:
         response = Mock()
         pills = Mock()
-        pills.count.return_value = 1
+        pills.count = AsyncMock(return_value=1)
         pill = pills.nth.return_value
         direct_links = pill.locator.return_value
-        direct_links.count.return_value = 1
+        direct_links.count = AsyncMock(return_value=1)
         direct_link = direct_links.first
-        direct_link.get_attribute.return_value = (
+        direct_link.get_attribute = AsyncMock(return_value=(
             "https://example.com/report?utm_source=chatgpt.com"
-        )
-        direct_link.inner_text.return_value = "example.com"
+        ))
+        direct_link.inner_text = AsyncMock(return_value="example.com")
+        pill.hover = AsyncMock()
         response.locator.return_value = pills
 
         page = Mock()
-        page.locator.return_value.count.return_value = 0
+        page.locator.return_value.count = AsyncMock(return_value=0)
+        page.wait_for_timeout = AsyncMock()
 
-        sources = chatgpt_browser._extract_sources(page, response)
+        sources = asyncio.run(chatgpt_browser._extract_sources(page, response))
 
         self.assertEqual(
             sources,
@@ -337,35 +443,39 @@ class ChatGPTBrowserTests(unittest.TestCase):
     def test_extracts_all_sources_from_citation_carousel(self) -> None:
         response = Mock()
         pills = Mock()
-        pills.count.return_value = 1
+        pills.count = AsyncMock(return_value=1)
         pill = pills.nth.return_value
-        pill.locator.return_value.count.return_value = 0
+        pill.locator.return_value.count = AsyncMock(return_value=0)
+        pill.hover = AsyncMock()
         response.locator.return_value = pills
 
         page = Mock()
         popovers = page.locator.return_value
-        popovers.count.return_value = 1
+        popovers.count = AsyncMock(return_value=1)
         popover = popovers.first
-        popover.inner_text.return_value = "1/2"
+        popover.inner_text = AsyncMock(return_value="1/2")
         links = Mock()
-        links.count.return_value = 1
+        links.count = AsyncMock(return_value=1)
         link = links.first
-        link.get_attribute.side_effect = [
+        link.get_attribute = AsyncMock(side_effect=[
             "https://first.example/report",
             "https://second.example/report",
-        ]
-        link.inner_text.side_effect = [
+        ])
+        link.inner_text = AsyncMock(side_effect=[
             "first.example\nFirst report",
             "second.example\nSecond report",
-        ]
+        ])
         buttons = Mock()
-        buttons.count.return_value = 2
+        buttons.count = AsyncMock(return_value=2)
+        buttons.nth.return_value.click = AsyncMock()
         popover.locator.side_effect = {
             "a[href]": links,
             "button": buttons,
         }.get
 
-        sources = chatgpt_browser._extract_sources(page, response)
+        page.wait_for_timeout = AsyncMock()
+        page.keyboard.press = AsyncMock()
+        sources = asyncio.run(chatgpt_browser._extract_sources(page, response))
 
         self.assertEqual(
             sources,
