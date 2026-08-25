@@ -97,10 +97,13 @@ cloakgpt ask "What is the weather today?" --timezone Asia/Taipei
   callback is immediately flushed as one stdout line. Parse every JSON line by
   `type`: surface or retain each `status.message` in order, use only
   `result.answer` as the completed response, and treat `error.message` plus the
-  nonzero exit as failure. When the runtime has a line-oriented stdout monitor,
-  run the command through it; Claude Code's Monitor is one example. If such a
-  monitor is unavailable, run the command in the foreground and keep waiting
-  instead of assuming that changing streams can force the runtime UI to update.
+  nonzero exit as failure. Run JSONL mode directly in the foreground; do not
+  pipe it through `grep`, `tail`, command substitution, or a filter that keeps
+  only the result because that hides live status. When the runtime has a
+  line-oriented stdout monitor, use it to consume the unfiltered command;
+  Claude Code's Monitor is one example. If such a monitor is unavailable, keep
+  waiting in the foreground instead of assuming that changing streams can force
+  the runtime UI to update.
 - Preserve the returned Markdown. When the answer contains `## Sources`, retain
   those links and do not invent, rewrite, or remove citations.
 - Report a nonzero exit and its concise error instead of presenting partial

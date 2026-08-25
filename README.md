@@ -487,6 +487,12 @@ the single successful `result` contains the complete Markdown `answer`. An
 through stdout-only monitors without mixing human status prefixes into the
 answer.
 
+Run JSONL mode directly in the foreground when live progress matters. Do not
+pipe it through `grep`, `tail`, command substitution, or another filter that
+keeps only the `result` line; doing so hides the status stream during long
+responses. Agents should consume every line as it arrives, show or retain each
+`status.message`, and finish with `result.answer`.
+
 `login` always uses a visible window so authentication can be completed
 interactively.
 
