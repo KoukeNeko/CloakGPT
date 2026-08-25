@@ -116,6 +116,61 @@ class SessionBrokerTests(unittest.TestCase):
         self.context.close.assert_not_called()
 
     @patch("cloakgpt_session.send_message_on_page")
+    def test_one_shot_closes_temporary_page_without_saving_session(self, send) -> None:
+        send.return_value = ("One-shot answer", "https://chatgpt.com/c/temporary")
+        status = Mock()
+
+        result = self.broker.send_once(
+            {
+                "question": "Hello",
+                "model": None,
+                "reasoning": None,
+            },
+            status,
+        )
+
+        self.assertEqual(result, {"answer": "One-shot answer"})
+        self.assertEqual(self.broker.sessions, {})
+        send.assert_called_once_with(
+            self.page,
+            cloakgpt_session.CHATGPT_URL,
+            "Hello",
+            None,
+            None,
+            unittest.mock.ANY,
+            reuse_page=True,
+        )
+        self.page.close.assert_called_once_with()
+        self.context.close.assert_called_once_with()
+        status.assert_any_call(
+            "Profile is owned by the running daemon; opening a temporary "
+            "conversation there..."
+        )
+
+    @patch("cloakgpt_session.send_message_on_page")
+    def test_one_shot_preserves_existing_persistent_page(self, send) -> None:
+        session_id = self.open_session()["session_id"]
+        temporary_page = Mock()
+        self.context.new_page.return_value = temporary_page
+        send.return_value = ("One-shot answer", "https://chatgpt.com/c/temporary")
+
+        result = self.broker.send_once(
+            {
+                "question": "Hello",
+                "model": None,
+                "reasoning": None,
+            },
+            Mock(),
+        )
+
+        self.assertEqual(result, {"answer": "One-shot answer"})
+        self.assertIn(session_id, self.broker.sessions)
+        self.assertIs(self.broker.pages[session_id], self.page)
+        temporary_page.close.assert_called_once_with()
+        self.page.close.assert_not_called()
+        self.context.close.assert_not_called()
+
+    @patch("cloakgpt_session.send_message_on_page")
     def test_restarts_page_once_only_for_pre_delivery_failure(self, send) -> None:
         session_id = self.open_session()["session_id"]
         replacement = Mock()

@@ -281,6 +281,55 @@ class CloakGPTCliTests(unittest.TestCase):
             status_callback=cloakgpt.show_status,
         )
 
+    @patch("cloakgpt.request_broker")
+    @patch("cloakgpt.start_conversation")
+    def test_one_shot_ask_reuses_daemon_after_profile_conflict(
+        self,
+        start_conversation,
+        request,
+    ) -> None:
+        start_conversation.side_effect = cloakgpt.ProfileInUseError("profile in use")
+        request.return_value = {"answer": "New conversation answer"}
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = cloakgpt.main(["ask", "Hello", "--output", "jsonl"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            [json.loads(line) for line in output.getvalue().splitlines()],
+            [
+                {"type": "result", "answer": "New conversation answer"},
+            ],
+        )
+        request.assert_called_once_with(
+            {
+                "operation": "send_once",
+                "question": "Hello",
+                "model": None,
+                "reasoning": None,
+            },
+            auto_start=False,
+            status_callback=cloakgpt._jsonl_status,
+        )
+
+    @patch("cloakgpt.request_broker")
+    @patch("cloakgpt.start_conversation")
+    def test_one_shot_ask_preserves_profile_error_without_daemon(
+        self,
+        start_conversation,
+        request,
+    ) -> None:
+        start_conversation.side_effect = cloakgpt.ProfileInUseError("profile in use")
+        request.side_effect = RuntimeError("CloakGPT daemon is not running")
+        errors = io.StringIO()
+
+        with redirect_stderr(errors):
+            result = cloakgpt.main(["ask", "Hello"])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(errors.getvalue().strip(), "error: profile in use")
+
     @patch("cloakgpt.start_conversation", return_value="Visible answer")
     def test_headed_option_shows_browser(self, start_conversation) -> None:
         result = cloakgpt.main(["ask", "Hello", "--headed"])

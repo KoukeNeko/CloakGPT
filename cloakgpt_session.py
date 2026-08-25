@@ -272,6 +272,37 @@ class SessionBroker:
         self._save_state()
         return {"answer": answer, **self.session_status(session_id)}
 
+    def send_once(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:
+        """Send a new conversation through the daemon without saving a session."""
+        self._reap_stale()
+        status(
+            "Profile is owned by the running daemon; opening a temporary "
+            "conversation there..."
+        )
+        model = ChatGPTModel(request["model"]) if request.get("model") else None
+        reasoning = (
+            ReasoningLevel(request["reasoning"]) if request.get("reasoning") else None
+        )
+        page = self._ensure_context().new_page()
+        try:
+            answer, _ = send_message_on_page(
+                page,
+                CHATGPT_URL,
+                str(request["question"]),
+                model,
+                reasoning,
+                status,
+                reuse_page=True,
+            )
+            return {"answer": answer}
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
+            if not self.pages:
+                self._close_context()
+
     def session_status(self, session_id: str) -> dict[str, Any]:
         record = self.sessions.get(session_id)
         if record is None:
@@ -335,6 +366,8 @@ class SessionBroker:
             return self.open_session(request, status)
         if operation == "send":
             return self.send(request, status)
+        if operation == "send_once":
+            return self.send_once(request, status)
         if operation == "session_status":
             return self.session_status(str(request["session_id"]))
         if operation == "close":

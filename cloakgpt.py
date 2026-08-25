@@ -15,6 +15,7 @@ from chatgpt_browser import (
     CHATGPT_URL,
     ChatGPTModel,
     DEFAULT_PROFILE_DIR,
+    ProfileInUseError,
     ReasoningLevel,
     launch_chatgpt_context,
     start_conversation,
@@ -148,6 +149,37 @@ def _print_command_error(message: str, output_format: str) -> None:
         )
         return
     print(f"error: {message}", file=sys.stderr)
+
+
+def _start_one_shot(args, status_callback) -> str:
+    try:
+        return start_conversation(
+            args.question,
+            timezone=args.timezone,
+            headless=args.headless,
+            model=args.model,
+            reasoning_level=args.reasoning,
+            status_callback=status_callback,
+        )
+    except ProfileInUseError as profile_error:
+        try:
+            result = request_broker(
+                {
+                    "operation": "send_once",
+                    "question": args.question,
+                    "model": str(args.model) if args.model is not None else None,
+                    "reasoning": str(args.reasoning)
+                    if args.reasoning is not None
+                    else None,
+                },
+                auto_start=False,
+                status_callback=status_callback,
+            )
+        except RuntimeError as daemon_error:
+            if str(daemon_error) == "CloakGPT daemon is not running":
+                raise profile_error
+            raise
+        return str(result["answer"])
 
 
 def run_browser_command(arguments: Sequence[str]) -> int:
@@ -453,14 +485,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_answer(result["answer"], args.output_format)
             return 0
 
-        answer = start_conversation(
-            args.question,
-            timezone=args.timezone,
-            headless=args.headless,
-            model=args.model,
-            reasoning_level=args.reasoning,
-            status_callback=status_callback,
-        )
+        answer = _start_one_shot(args, status_callback)
     except KeyboardInterrupt:
         output_format = getattr(args, "output_format", "text")
         if output_format == "jsonl":
