@@ -427,6 +427,13 @@ want to observe or debug the browser window:
 cloakgpt ask "Reply only: OK." --headed
 ```
 
+If the persistent-session daemon already owns the browser profile, a one-shot
+`ask` automatically opens a temporary new conversation through that daemon
+instead of launching a competing browser. It does not create a persistent
+session record, closes the temporary page after completion, and leaves existing
+persistent sessions running. The daemon's existing browser mode and timezone
+apply while it owns the profile.
+
 Text output keeps progress on stderr and writes only the completed answer to
 stdout. Agent runtimes that monitor stdout one line at a time can request a
 machine-readable event stream instead:

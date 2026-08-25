@@ -36,7 +36,10 @@ external ChatGPT conversation, so submit only messages the user requested.
   The first message creates a ChatGPT conversation; later messages reuse the
   same live page.
 - Use `cloakgpt ask <question>` without a session for a one-shot new
-  conversation.
+  conversation. If the persistent daemon already owns the browser profile,
+  CloakGPT automatically uses a temporary page in that daemon, closes it after
+  completion, and leaves existing persistent sessions intact. Do not stop the
+  daemon merely to start a new one-shot conversation.
 - Prefer the installed `cloakgpt` command. In a source checkout where it is not
   installed, use that checkout's virtual-environment Python with `cloakgpt.py`.
 - Pass the question as one argument. Use the shell's safe argument quoting; do
