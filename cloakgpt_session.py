@@ -454,13 +454,14 @@ async def _run_broker_async(*, data_dir: Path, headless: bool, timezone: str) ->
     _write_json(
         _metadata_path(data_dir),
         {
-            "version": 1,
+            "version": 2,
             "pid": os.getpid(),
             "family": family,
             "address": address,
             "auth_key": base64.b64encode(auth_key).decode("ascii"),
             "headless": headless,
             "timezone": timezone,
+            "capabilities": ["parallel_sessions"],
         },
     )
 

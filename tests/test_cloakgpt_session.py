@@ -330,6 +330,11 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(all_entered.wait(), timeout=1)
         self.assertEqual(len(self.broker.pages), 5)
         self.assertEqual(self.context.close.await_count, 0)
+        daemon_status = await self.broker.dispatch({"operation": "ping"}, Mock())
+        self.assertEqual(daemon_status["active_requests"], 5)
+        self.assertEqual(daemon_status["queued_requests"], 0)
+        self.assertEqual(daemon_status["open_pages"], 5)
+        self.assertEqual(daemon_status["browser"], "running")
         release.set()
         results = await asyncio.gather(*tasks)
 
@@ -383,6 +388,9 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(entered_questions, ["First"])
         second_status.assert_any_call("Waiting for an earlier message in this session...")
+        daemon_status = await self.broker.dispatch({"operation": "ping"}, Mock())
+        self.assertEqual(daemon_status["active_requests"], 1)
+        self.assertEqual(daemon_status["queued_requests"], 1)
         release_first.set()
         await asyncio.gather(first, second)
 

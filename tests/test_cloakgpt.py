@@ -260,6 +260,7 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(output.getvalue().strip(), "session-123")
         self.assertIn("persistent conversation ready", errors.getvalue())
         self.assertIn("Browser: on demand (headless)", errors.getvalue())
+        self.assertIn("Different session IDs can run concurrently", errors.getvalue())
 
     @patch("cloakgpt.request_broker")
     def test_ask_with_session_uses_persistent_broker(self, request) -> None:
@@ -276,7 +277,7 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(output.getvalue().strip(), "Persistent answer")
         self.assertEqual(
             errors.getvalue().strip(),
-            "[status] Queueing the session message in the shared browser...",
+            "[status] Submitting the session message to the shared browser...",
         )
         request.assert_called_once_with(
             {
@@ -303,7 +304,7 @@ class CloakGPTCliTests(unittest.TestCase):
             [
                 {
                     "type": "status",
-                    "message": "Queueing a new conversation in the shared browser...",
+                    "message": "Submitting a new conversation to the shared browser...",
                 },
                 {"type": "result", "answer": "New conversation answer"},
             ],
@@ -331,7 +332,7 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(
             errors.getvalue().strip(),
-            "[status] Queueing a new conversation in the shared browser...\n"
+            "[status] Submitting a new conversation to the shared browser...\n"
             "error: profile in use",
         )
 
@@ -358,7 +359,7 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(output.getvalue().strip(), "Answer")
         self.assertEqual(
             errors.getvalue().strip(),
-            "[status] Queueing a new conversation in the shared browser...\n"
+            "[status] Submitting a new conversation to the shared browser...\n"
             "[status] Waiting for ChatGPT response...",
         )
 
@@ -387,7 +388,7 @@ class CloakGPTCliTests(unittest.TestCase):
             [
                 {
                     "type": "status",
-                    "message": "Queueing a new conversation in the shared browser...",
+                    "message": "Submitting a new conversation to the shared browser...",
                 },
                 {"type": "status", "message": "Opening ChatGPT..."},
                 {"type": "status", "message": "Sending message..."},
@@ -414,7 +415,7 @@ class CloakGPTCliTests(unittest.TestCase):
             [
                 {
                     "type": "status",
-                    "message": "Queueing a new conversation in the shared browser...",
+                    "message": "Submitting a new conversation to the shared browser...",
                 },
                 {"type": "error", "message": "not available"},
             ],
@@ -429,7 +430,7 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(
             errors.getvalue().strip(),
-            "[status] Queueing a new conversation in the shared browser...\n"
+            "[status] Submitting a new conversation to the shared browser...\n"
             "error: not available",
         )
 
@@ -442,7 +443,7 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(result, 130)
         self.assertEqual(
             errors.getvalue().strip(),
-            "[status] Queueing a new conversation in the shared browser...\n"
+            "[status] Submitting a new conversation to the shared browser...\n"
             "stopped",
         )
 

@@ -150,7 +150,7 @@ def _print_command_error(message: str, output_format: str) -> None:
 
 
 def _start_one_shot(args, status_callback) -> str:
-    status_callback("Queueing a new conversation in the shared browser...")
+    status_callback("Submitting a new conversation to the shared browser...")
     result = request_broker(
         {
             "operation": "send_once",
@@ -330,6 +330,10 @@ def _print_session_motd(result: dict) -> None:
         file=sys.stderr,
     )
     print(
+        "[session] Different session IDs can run concurrently.",
+        file=sys.stderr,
+    )
+    print(
         f'[session] Next: cloakgpt ask --session {session_id} "message"',
         file=sys.stderr,
     )
@@ -451,7 +455,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError(
                     "browser mode is selected by session open; omit --headed"
                 )
-            status_callback("Queueing the session message in the shared browser...")
+            status_callback("Submitting the session message to the shared browser...")
             result = request_broker(
                 {
                     "operation": "send",
