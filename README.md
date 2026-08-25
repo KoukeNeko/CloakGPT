@@ -3,10 +3,10 @@
 [![CI](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml)
 
 CloakGPT is a CLI that automates a user-owned ChatGPT session through
-CloakBrowser. It can start conversations, keep persistent agent sessions,
-select an available model and reasoning level, report ChatGPT's live page
-status, and return the final response with Markdown formatting and citation
-sources.
+CloakBrowser. It can start conversations, keep persistent agent sessions, run
+different sessions concurrently in one shared browser, select an available
+model and reasoning level, report ChatGPT's live page status, and return the
+final response with Markdown formatting and citation sources.
 
 ## Table of contents
 
@@ -466,11 +466,14 @@ cloakgpt ask "Reply only: OK." --headed
 ```
 
 Every `ask`, including a one-shot new conversation, goes through one local
-daemon. Concurrent calls from an agent and a terminal are queued instead of
-launching competing Chromium processes against the same profile. A one-shot
-request opens a temporary new page, does not create a persistent session
-record, and closes the browser after completion. The daemon's configured
-browser mode and timezone apply to queued requests.
+daemon and one persistent browser context. Different persistent session IDs and
+independent one-shot calls open separate pages and may generate responses at the
+same time; CloakGPT does not impose a page-count limit. Calls using the same
+session ID remain FIFO so each follow-up sees the preceding turn's saved
+conversation URL. A completed request closes only its own page. Chromium closes
+after the last active or waiting request finishes, while the daemon remains
+ready without holding the profile. The daemon's configured browser mode and
+timezone apply to every request.
 
 Text output keeps progress on stderr and writes only the completed answer to
 stdout. Agent runtimes that monitor stdout one line at a time can request a
@@ -514,10 +517,11 @@ cloakgpt ask "Follow-up question" --session SESSION_ID
 
 The first message creates a ChatGPT conversation. CloakGPT saves its validated
 conversation URL under the local session ID. Every message opens that URL in a
-fresh browser, waits for the complete answer, saves the current URL, and closes
-the page and browser context. This preserves follow-up conversation state
-without keeping Chromium running between commands. Set `CLOAKGPT_SESSION_ID`
-to omit `--session`:
+fresh page, waits for the complete answer, saves the current URL, and closes
+only that request's page. Other sessions in the shared browser continue running;
+the browser context closes when the final request finishes. This preserves
+follow-up conversation state without keeping Chromium running while the daemon
+is idle. Set `CLOAKGPT_SESSION_ID` to omit `--session`:
 
 ```sh
 export CLOAKGPT_SESSION_ID=SESSION_ID
@@ -538,9 +542,11 @@ opening the session:
 cloakgpt session open --headed
 ```
 
-One daemon serializes all one-shot and persistent requests that share the
-browser profile. Its configured headed/headless mode and timezone cannot change
-while it is running. Inspect and cleanly close state with:
+One daemon owns the browser profile. Requests for different session IDs and
+one-shot conversations run on independent pages without an application-level
+page limit. Requests sharing one session ID are serialized in arrival order.
+The daemon's configured headed/headless mode and timezone cannot change while
+it is running. Inspect and cleanly close state with:
 
 ```sh
 cloakgpt session status SESSION_ID
@@ -548,6 +554,10 @@ cloakgpt session close SESSION_ID
 cloakgpt daemon status
 cloakgpt daemon stop
 ```
+
+`daemon status` reports whether the browser is running plus the active, queued,
+and open-page counts. `session status` reports that session's running and queued
+request counts.
 
 An idle daemon does not own the browser profile, so `cloakgpt login` can open it
 without discarding session IDs. Do not start login while a session request is
@@ -557,7 +567,8 @@ URLs.
 
 Browser failures before delivery are retried once on a reconstructed page.
 Failures after the send click report `delivery state unknown` and are never
-automatically resent. The browser is closed in both success and error paths.
+automatically resent. The request's page is closed in both success and error
+paths without closing pages owned by other active sessions.
 
 Status is printed to stderr while only the final response is printed to stdout,
 so responses can be redirected or piped without status lines:

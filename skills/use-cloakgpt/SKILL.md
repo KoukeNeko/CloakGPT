@@ -34,14 +34,14 @@ external ChatGPT conversation, so submit only messages the user requested.
   The MOTD and status are on stderr.
 - Send every persistent turn with `cloakgpt ask <question> --session <ID>`.
   The first message creates a ChatGPT conversation; later messages reopen its
-  saved conversation URL. Each request closes its browser after the complete
+  saved conversation URL. Each request closes its own page after the complete
   answer, while the session ID remains reusable.
 - Use `cloakgpt ask <question>` without a session for a one-shot new
   conversation. Every ask uses the shared daemon, so concurrent agent and
-  terminal calls queue instead of competing for the browser profile. A
-  one-shot request uses a temporary page, closes the browser after completion,
-  and leaves existing persistent sessions intact. Do not stop the daemon merely
-  to start a new one-shot conversation.
+  terminal calls use separate pages instead of competing for the browser
+  profile. A one-shot request uses a temporary page and leaves existing
+  persistent sessions intact. Do not stop the daemon merely to start a new
+  one-shot conversation.
 - Prefer the installed `cloakgpt` command. In a source checkout where it is not
   installed, use that checkout's virtual-environment Python with `cloakgpt.py`.
 - Pass the question as one argument. Use the shell's safe argument quoting; do
@@ -84,9 +84,15 @@ cloakgpt ask "What is the weather today?" --timezone Asia/Taipei
   browser request and cannot change while its daemon is running.
 - Reuse one session ID throughout the same agent task. Do not open multiple
   sessions speculatively or stop the shared daemon.
+- Different agents or independent tasks should use different session IDs.
+  Distinct sessions and one-shot requests may generate concurrently without a
+  CloakGPT page limit. Concurrent calls sharing one session ID remain FIFO so a
+  follow-up cannot overtake the preceding turn.
 - A session stores a validated conversation URL, not a live page. Every turn
-  restores that URL and closes Chromium after collecting the full answer. Do
-  not describe it as the exact same browser page or process.
+  restores that URL in a request-owned page and closes that page after
+  collecting the full answer. Other active pages remain open; Chromium closes
+  only after the final active or waiting request finishes. Do not describe it
+  as the exact same browser page or process.
 - Do not impose an arbitrary response timeout. ChatGPT generation and web search
   can take an unknown amount of time. Keep waiting while the process reports
   progress; stop with Ctrl+C only at the user's request or when cancellation is
