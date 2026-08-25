@@ -15,10 +15,8 @@ from chatgpt_browser import (
     CHATGPT_URL,
     ChatGPTModel,
     DEFAULT_PROFILE_DIR,
-    ProfileInUseError,
     ReasoningLevel,
     launch_chatgpt_context,
-    start_conversation,
 )
 from cloakgpt_session import request_broker, run_broker
 from cloakgpt_update import (
@@ -152,34 +150,19 @@ def _print_command_error(message: str, output_format: str) -> None:
 
 
 def _start_one_shot(args, status_callback) -> str:
-    try:
-        return start_conversation(
-            args.question,
-            timezone=args.timezone,
-            headless=args.headless,
-            model=args.model,
-            reasoning_level=args.reasoning,
-            status_callback=status_callback,
-        )
-    except ProfileInUseError as profile_error:
-        try:
-            result = request_broker(
-                {
-                    "operation": "send_once",
-                    "question": args.question,
-                    "model": str(args.model) if args.model is not None else None,
-                    "reasoning": str(args.reasoning)
-                    if args.reasoning is not None
-                    else None,
-                },
-                auto_start=False,
-                status_callback=status_callback,
-            )
-        except RuntimeError as daemon_error:
-            if str(daemon_error) == "CloakGPT daemon is not running":
-                raise profile_error
-            raise
-        return str(result["answer"])
+    status_callback("Queueing a new conversation in the shared browser...")
+    result = request_broker(
+        {
+            "operation": "send_once",
+            "question": args.question,
+            "model": str(args.model) if args.model is not None else None,
+            "reasoning": str(args.reasoning) if args.reasoning is not None else None,
+        },
+        headless=args.headless,
+        timezone=args.timezone,
+        status_callback=status_callback,
+    )
+    return str(result["answer"])
 
 
 def run_browser_command(arguments: Sequence[str]) -> int:
@@ -468,6 +451,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError(
                     "browser mode is selected by session open; omit --headed"
                 )
+            status_callback("Queueing the session message in the shared browser...")
             result = request_broker(
                 {
                     "operation": "send",

@@ -465,11 +465,12 @@ want to observe or debug the browser window:
 cloakgpt ask "Reply only: OK." --headed
 ```
 
-If a session request is currently using the browser profile, a concurrent
-one-shot `ask` automatically queues a temporary new conversation through the
-daemon instead of launching a competing browser. It does not create a
-persistent session record and closes the browser after completion. The
-daemon's configured browser mode and timezone apply to that request.
+Every `ask`, including a one-shot new conversation, goes through one local
+daemon. Concurrent calls from an agent and a terminal are queued instead of
+launching competing Chromium processes against the same profile. A one-shot
+request opens a temporary new page, does not create a persistent session
+record, and closes the browser after completion. The daemon's configured
+browser mode and timezone apply to queued requests.
 
 Text output keeps progress on stderr and writes only the completed answer to
 stdout. Agent runtimes that monitor stdout one line at a time can request a
@@ -531,9 +532,9 @@ opening the session:
 cloakgpt session open --headed
 ```
 
-One daemon serializes access to one persistent browser profile. Its configured
-headed/headless mode and timezone cannot change while it is running. Inspect
-and cleanly close state with:
+One daemon serializes all one-shot and persistent requests that share the
+browser profile. Its configured headed/headless mode and timezone cannot change
+while it is running. Inspect and cleanly close state with:
 
 ```sh
 cloakgpt session status SESSION_ID

@@ -37,10 +37,11 @@ external ChatGPT conversation, so submit only messages the user requested.
   saved conversation URL. Each request closes its browser after the complete
   answer, while the session ID remains reusable.
 - Use `cloakgpt ask <question>` without a session for a one-shot new
-  conversation. If the persistent daemon already owns the browser profile,
-  CloakGPT automatically uses a temporary page in that daemon, closes it after
-  completion, and leaves existing persistent sessions intact. Do not stop the
-  daemon merely to start a new one-shot conversation.
+  conversation. Every ask uses the shared daemon, so concurrent agent and
+  terminal calls queue instead of competing for the browser profile. A
+  one-shot request uses a temporary page, closes the browser after completion,
+  and leaves existing persistent sessions intact. Do not stop the daemon merely
+  to start a new one-shot conversation.
 - Prefer the installed `cloakgpt` command. In a source checkout where it is not
   installed, use that checkout's virtual-environment Python with `cloakgpt.py`.
 - Pass the question as one argument. Use the shell's safe argument quoting; do

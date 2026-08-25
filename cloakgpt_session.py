@@ -276,10 +276,7 @@ class SessionBroker:
     def send_once(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:
         """Send a new conversation through the daemon without saving a session."""
         self._reap_stale()
-        status(
-            "Profile is owned by the running daemon; opening a temporary "
-            "conversation there..."
-        )
+        status("Opening a temporary new conversation...")
         model = ChatGPTModel(request["model"]) if request.get("model") else None
         reasoning = (
             ReasoningLevel(request["reasoning"]) if request.get("reasoning") else None

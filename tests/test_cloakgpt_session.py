@@ -164,10 +164,7 @@ class SessionBrokerTests(unittest.TestCase):
         )
         self.page.close.assert_called_once_with()
         self.context.close.assert_called_once_with()
-        status.assert_any_call(
-            "Profile is owned by the running daemon; opening a temporary "
-            "conversation there..."
-        )
+        status.assert_any_call("Opening a temporary new conversation...")
 
     @patch("cloakgpt_session.send_message_on_page")
     def test_one_shot_preserves_cold_session_record(self, send) -> None:

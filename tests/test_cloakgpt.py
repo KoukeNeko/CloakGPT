@@ -211,8 +211,8 @@ class CloakGPTCliTests(unittest.TestCase):
             "`cloakgpt daemon stop`; then retry.",
         )
 
-    @patch("cloakgpt.start_conversation", return_value="First answer")
-    def test_ask_command(self, start_conversation) -> None:
+    @patch("cloakgpt.request_broker", return_value={"answer": "First answer"})
+    def test_ask_command(self, request) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
             result = cloakgpt.main(
@@ -230,12 +230,15 @@ class CloakGPTCliTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(output.getvalue().strip(), "First answer")
-        start_conversation.assert_called_once_with(
-            "Hello",
-            timezone="Asia/Taipei",
+        request.assert_called_once_with(
+            {
+                "operation": "send_once",
+                "question": "Hello",
+                "model": "gpt-5.5",
+                "reasoning": "high",
+            },
             headless=True,
-            model=cloakgpt.ChatGPTModel.GPT_5_5,
-            reasoning_level=cloakgpt.ReasoningLevel.HIGH,
+            timezone="Asia/Taipei",
             status_callback=cloakgpt.show_status,
         )
 
@@ -262,14 +265,19 @@ class CloakGPTCliTests(unittest.TestCase):
     def test_ask_with_session_uses_persistent_broker(self, request) -> None:
         request.return_value = {"answer": "Persistent answer"}
         output = io.StringIO()
+        errors = io.StringIO()
 
-        with redirect_stdout(output):
+        with redirect_stdout(output), redirect_stderr(errors):
             result = cloakgpt.main(
                 ["ask", "Hello", "--session", "session-123", "--reasoning", "high"]
             )
 
         self.assertEqual(result, 0)
         self.assertEqual(output.getvalue().strip(), "Persistent answer")
+        self.assertEqual(
+            errors.getvalue().strip(),
+            "[status] Queueing the session message in the shared browser...",
+        )
         request.assert_called_once_with(
             {
                 "operation": "send",
@@ -282,13 +290,7 @@ class CloakGPTCliTests(unittest.TestCase):
         )
 
     @patch("cloakgpt.request_broker")
-    @patch("cloakgpt.start_conversation")
-    def test_one_shot_ask_reuses_daemon_after_profile_conflict(
-        self,
-        start_conversation,
-        request,
-    ) -> None:
-        start_conversation.side_effect = cloakgpt.ProfileInUseError("profile in use")
+    def test_one_shot_ask_uses_shared_daemon(self, request) -> None:
         request.return_value = {"answer": "New conversation answer"}
         output = io.StringIO()
 
@@ -299,6 +301,10 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(
             [json.loads(line) for line in output.getvalue().splitlines()],
             [
+                {
+                    "type": "status",
+                    "message": "Queueing a new conversation in the shared browser...",
+                },
                 {"type": "result", "answer": "New conversation answer"},
             ],
         )
@@ -309,41 +315,40 @@ class CloakGPTCliTests(unittest.TestCase):
                 "model": None,
                 "reasoning": None,
             },
-            auto_start=False,
+            headless=True,
+            timezone="Asia/Taipei",
             status_callback=cloakgpt._jsonl_status,
         )
 
     @patch("cloakgpt.request_broker")
-    @patch("cloakgpt.start_conversation")
-    def test_one_shot_ask_preserves_profile_error_without_daemon(
-        self,
-        start_conversation,
-        request,
-    ) -> None:
-        start_conversation.side_effect = cloakgpt.ProfileInUseError("profile in use")
-        request.side_effect = RuntimeError("CloakGPT daemon is not running")
+    def test_one_shot_ask_reports_broker_error(self, request) -> None:
+        request.side_effect = RuntimeError("profile in use")
         errors = io.StringIO()
 
         with redirect_stderr(errors):
             result = cloakgpt.main(["ask", "Hello"])
 
         self.assertEqual(result, 1)
-        self.assertEqual(errors.getvalue().strip(), "error: profile in use")
+        self.assertEqual(
+            errors.getvalue().strip(),
+            "[status] Queueing a new conversation in the shared browser...\n"
+            "error: profile in use",
+        )
 
-    @patch("cloakgpt.start_conversation", return_value="Visible answer")
-    def test_headed_option_shows_browser(self, start_conversation) -> None:
+    @patch("cloakgpt.request_broker", return_value={"answer": "Visible answer"})
+    def test_headed_option_shows_browser(self, request) -> None:
         result = cloakgpt.main(["ask", "Hello", "--headed"])
 
         self.assertEqual(result, 0)
-        self.assertFalse(start_conversation.call_args.kwargs["headless"])
+        self.assertFalse(request.call_args.kwargs["headless"])
 
-    @patch("cloakgpt.start_conversation")
-    def test_status_is_printed_to_stderr_only(self, start_conversation) -> None:
-        def run(_question, **options):
+    @patch("cloakgpt.request_broker")
+    def test_status_is_printed_to_stderr_only(self, request) -> None:
+        def run(_request, **options):
             options["status_callback"]("Waiting for ChatGPT response...")
-            return "Answer"
+            return {"answer": "Answer"}
 
-        start_conversation.side_effect = run
+        request.side_effect = run
         output = io.StringIO()
         errors = io.StringIO()
         with redirect_stdout(output), redirect_stderr(errors):
@@ -353,21 +358,22 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(output.getvalue().strip(), "Answer")
         self.assertEqual(
             errors.getvalue().strip(),
+            "[status] Queueing a new conversation in the shared browser...\n"
             "[status] Waiting for ChatGPT response...",
         )
 
-    @patch("cloakgpt.start_conversation")
+    @patch("cloakgpt.request_broker")
     def test_jsonl_output_streams_status_and_result_to_stdout(
         self,
-        start_conversation,
+        request,
     ) -> None:
-        def run(_question, **options):
+        def run(_request, **options):
             options["status_callback"]("Opening ChatGPT...")
             options["status_callback"]("Sending message...")
             options["status_callback"]("ChatGPT is responding...")
-            return "技術答案"
+            return {"answer": "技術答案"}
 
-        start_conversation.side_effect = run
+        request.side_effect = run
         output = io.StringIO()
         errors = io.StringIO()
 
@@ -379,6 +385,10 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(
             [json.loads(line) for line in output.getvalue().splitlines()],
             [
+                {
+                    "type": "status",
+                    "message": "Queueing a new conversation in the shared browser...",
+                },
                 {"type": "status", "message": "Opening ChatGPT..."},
                 {"type": "status", "message": "Sending message..."},
                 {"type": "status", "message": "ChatGPT is responding..."},
@@ -386,10 +396,10 @@ class CloakGPTCliTests(unittest.TestCase):
             ],
         )
 
-    @patch("cloakgpt.start_conversation", side_effect=ValueError("not available"))
+    @patch("cloakgpt.request_broker", side_effect=ValueError("not available"))
     def test_jsonl_output_reports_machine_readable_error(
         self,
-        _start_conversation,
+        _request,
     ) -> None:
         output = io.StringIO()
         errors = io.StringIO()
@@ -400,27 +410,41 @@ class CloakGPTCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(errors.getvalue(), "")
         self.assertEqual(
-            json.loads(output.getvalue()),
-            {"type": "error", "message": "not available"},
+            [json.loads(line) for line in output.getvalue().splitlines()],
+            [
+                {
+                    "type": "status",
+                    "message": "Queueing a new conversation in the shared browser...",
+                },
+                {"type": "error", "message": "not available"},
+            ],
         )
 
-    @patch("cloakgpt.start_conversation", side_effect=ValueError("not available"))
-    def test_errors_are_reported_without_traceback(self, _start_conversation) -> None:
+    @patch("cloakgpt.request_broker", side_effect=ValueError("not available"))
+    def test_errors_are_reported_without_traceback(self, _request) -> None:
         errors = io.StringIO()
         with redirect_stderr(errors):
             result = cloakgpt.main(["ask", "Hello"])
 
         self.assertEqual(result, 1)
-        self.assertEqual(errors.getvalue().strip(), "error: not available")
+        self.assertEqual(
+            errors.getvalue().strip(),
+            "[status] Queueing a new conversation in the shared browser...\n"
+            "error: not available",
+        )
 
-    @patch("cloakgpt.start_conversation", side_effect=KeyboardInterrupt)
-    def test_ctrl_c_stops_without_traceback(self, _start_conversation) -> None:
+    @patch("cloakgpt.request_broker", side_effect=KeyboardInterrupt)
+    def test_ctrl_c_stops_without_traceback(self, _request) -> None:
         errors = io.StringIO()
         with redirect_stderr(errors):
             result = cloakgpt.main(["ask", "Hello"])
 
         self.assertEqual(result, 130)
-        self.assertEqual(errors.getvalue().strip(), "stopped")
+        self.assertEqual(
+            errors.getvalue().strip(),
+            "[status] Queueing a new conversation in the shared browser...\n"
+            "stopped",
+        )
 
 
 if __name__ == "__main__":
