@@ -1,1 +1,2 @@
 cloakbrowser>=0.5.8
+certifi>=2024.8.30

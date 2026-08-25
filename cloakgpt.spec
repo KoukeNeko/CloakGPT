@@ -8,6 +8,7 @@ from PyInstaller.utils.hooks import collect_all
 cloakbrowser_datas, cloakbrowser_binaries, cloakbrowser_hiddenimports = collect_all(
     "cloakbrowser"
 )
+certifi_datas, certifi_binaries, certifi_hiddenimports = collect_all("certifi")
 playwright_datas, playwright_binaries, playwright_hiddenimports = collect_all(
     "playwright"
 )
@@ -15,9 +16,11 @@ playwright_datas, playwright_binaries, playwright_hiddenimports = collect_all(
 a = Analysis(
     ["cloakgpt.py"],
     pathex=[],
-    binaries=cloakbrowser_binaries + playwright_binaries,
-    datas=cloakbrowser_datas + playwright_datas,
-    hiddenimports=cloakbrowser_hiddenimports + playwright_hiddenimports,
+    binaries=cloakbrowser_binaries + certifi_binaries + playwright_binaries,
+    datas=cloakbrowser_datas + certifi_datas + playwright_datas,
+    hiddenimports=(
+        cloakbrowser_hiddenimports + certifi_hiddenimports + playwright_hiddenimports
+    ),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

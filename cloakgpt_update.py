@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import stat
 import subprocess
 import sys
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+import certifi
 
 from cloakgpt_build import ASSET_NAME, CHANNEL, VERSION
 
@@ -42,9 +45,29 @@ def _request(url: str) -> Request:
     )
 
 
+def _ca_bundle() -> str:
+    configured = os.environ.get("SSL_CERT_FILE")
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_file():
+            raise RuntimeError(
+                f"SSL_CERT_FILE does not name a CA bundle file: {path}"
+            )
+        return str(path)
+    return certifi.where()
+
+
+def _tls_context() -> ssl.SSLContext:
+    return ssl.create_default_context(cafile=_ca_bundle())
+
+
+def _open_url(url: str, *, timeout: int):
+    return urlopen(_request(url), timeout=timeout, context=_tls_context())
+
+
 def _read_json(url: str) -> Any:
     try:
-        with urlopen(_request(url), timeout=30) as response:
+        with _open_url(url, timeout=30) as response:
             return json.load(response)
     except Exception as error:
         raise RuntimeError(f"could not read GitHub release information: {error}") from error
@@ -84,7 +107,7 @@ def _asset(release: dict[str, Any], name: str) -> dict[str, Any]:
 
 def _download_file(url: str, destination: Path) -> None:
     try:
-        with urlopen(_request(url), timeout=60) as response:
+        with _open_url(url, timeout=60) as response:
             with destination.open("xb") as output:
                 while chunk := response.read(1024 * 1024):
                     output.write(chunk)
@@ -94,7 +117,7 @@ def _download_file(url: str, destination: Path) -> None:
 
 def _download_text(url: str) -> str:
     try:
-        with urlopen(_request(url), timeout=30) as response:
+        with _open_url(url, timeout=30) as response:
             data = response.read(4097)
     except Exception as error:
         raise RuntimeError(f"checksum download failed: {error}") from error

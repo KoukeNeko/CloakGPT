@@ -1,4 +1,5 @@
 import hashlib
+import os
 import subprocess
 import tempfile
 import unittest
@@ -9,6 +10,38 @@ import cloakgpt_update
 
 
 class CloakGPTUpdateTests(unittest.TestCase):
+    @patch("cloakgpt_update.certifi.where", return_value="bundled-ca.pem")
+    def test_default_ca_bundle_comes_from_certifi(self, where) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            bundle = cloakgpt_update._ca_bundle()
+
+        self.assertEqual(bundle, "bundled-ca.pem")
+        where.assert_called_once_with()
+
+    def test_ssl_cert_file_overrides_bundled_ca(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary) / "enterprise-ca.pem"
+            bundle.write_text("certificate", encoding="ascii")
+
+            with patch.dict(os.environ, {"SSL_CERT_FILE": str(bundle)}, clear=True):
+                selected = cloakgpt_update._ca_bundle()
+
+        self.assertEqual(selected, str(bundle))
+
+    def test_url_opener_uses_verified_tls_context(self) -> None:
+        request = Mock()
+        context = Mock()
+        response = Mock()
+        with (
+            patch("cloakgpt_update._request", return_value=request),
+            patch("cloakgpt_update._tls_context", return_value=context),
+            patch("cloakgpt_update.urlopen", return_value=response) as open_url,
+        ):
+            result = cloakgpt_update._open_url("https://example.test", timeout=30)
+
+        self.assertIs(result, response)
+        open_url.assert_called_once_with(request, timeout=30, context=context)
+
     def test_selects_first_public_prerelease(self) -> None:
         releases = [
             {"tag_name": "draft", "prerelease": True, "draft": True},
