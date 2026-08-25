@@ -24,6 +24,34 @@ def async_context(*pages: Mock) -> Mock:
     return context
 
 
+class BrokerClientTests(unittest.TestCase):
+    @patch("cloakgpt_session._wait_for_broker_exit")
+    @patch("cloakgpt_session.Client")
+    @patch("cloakgpt_session._load_metadata")
+    def test_stop_waits_until_daemon_process_exits(self, metadata, client, wait) -> None:
+        metadata.return_value = {
+            "pid": 4321,
+            "address": "test-address",
+            "family": "AF_PIPE",
+            "auth_key": "dGVzdC1rZXk=",
+        }
+        connection = client.return_value
+        connection.recv.return_value = {
+            "type": "result",
+            "result": {"stopped": True},
+        }
+
+        result = cloakgpt_session.request_broker(
+            {"operation": "stop"},
+            data_dir=Path("unused"),
+            auto_start=False,
+        )
+
+        self.assertEqual(result, {"stopped": True})
+        wait.assert_called_once_with(4321)
+        connection.close.assert_called()
+
+
 class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

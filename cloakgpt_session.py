@@ -546,6 +546,14 @@ def _load_metadata(data_dir: Path) -> dict[str, Any] | None:
     return None
 
 
+def _wait_for_broker_exit(pid: object, timeout: float = 10) -> None:
+    deadline = time.monotonic() + timeout
+    while _pid_is_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if _pid_is_alive(pid):
+        raise RuntimeError("CloakGPT daemon did not stop")
+
+
 def _broker_command(headless: bool, timezone: str) -> list[str]:
     command = [sys.executable]
     if not getattr(sys, "frozen", False):
@@ -684,6 +692,9 @@ def request_broker(
                 result = event.get("result")
                 if not isinstance(result, dict):
                     raise RuntimeError("invalid response from the CloakGPT daemon")
+                if request.get("operation") == "stop":
+                    connection.close()
+                    _wait_for_broker_exit(metadata.get("pid"))
                 return result
             raise RuntimeError("invalid event from the CloakGPT daemon")
     finally:
