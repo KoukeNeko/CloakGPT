@@ -189,6 +189,13 @@ records. Linux and macOS replace the executable immediately. Windows stages a
 hidden UTF-8 updater that replaces the executable after the command exits,
 rolls back a failed build, and reports its result on the next CloakGPT command.
 
+Updater HTTPS requests verify GitHub with a CA bundle included in the packaged
+executable. Networks whose TLS proxy uses a private root can point the updater
+to an administrator-provided PEM bundle with `SSL_CERT_FILE`. Do not disable
+certificate verification. If an older CloakGPT build cannot reach GitHub well
+enough to self-update, rerun the official installer to bootstrap the current
+release; installation preserves the existing browser profile and session data.
+
 The external browser remains independently managed. Update it only when needed:
 
 ```sh
@@ -294,9 +301,10 @@ Follow this procedure:
    user when the timezone cannot be determined reliably; do not guess. Tell the
    user to sign in only in the visible ChatGPT browser window and then press
    Enter in the terminal. Never request, enter, expose, or store the user's
-   password, cookies, or session tokens. If an existing CloakGPT daemon owns the
-   browser profile, inspect its status and ask permission before stopping it;
-   stopping preserves session IDs and conversation URLs.
+   password, cookies, or session tokens. An idle CloakGPT daemon does not hold
+   the profile. If login reports that the profile is in use, inspect daemon
+   status and ask permission before stopping an active request; stopping
+   preserves session IDs and conversation URLs.
 8. Make the runtime rescan its skills. Gemini CLI uses `/skills reload` followed
    by `/skills list`. Claude Code normally detects changes live, but must be
    restarted if its top-level skills directory did not exist when the session
@@ -368,13 +376,13 @@ The default user timezone is `Asia/Taipei`. Override it with an IANA timezone:
 cloakgpt login --timezone America/New_York
 ```
 
-Only one process can own the persistent browser profile. If `ask` or `login`
-reports that the profile is already in use (older builds may instead print a
-Chromium log ending in `exitCode=21`), first run `cloakgpt daemon status`. Reuse
-a known session ID when that daemon owns the intended conversation, or run
-`cloakgpt daemon stop` and retry. If no daemon is running, close the existing
-CloakGPT Chromium window. Do not delete profile lock files or terminate
-unrelated Chrome processes.
+Only one process can own the persistent browser profile at a time. Session
+browsers close after every completed response, and an idle daemon does not hold
+the profile. If `ask` or `login` still reports that it is in use (older builds
+may instead print a Chromium log ending in `exitCode=21`), run
+`cloakgpt daemon status`. Wait for an active request or stop the daemon and
+retry. If no daemon is running, close the existing CloakGPT Chromium window.
+Do not delete profile lock files or terminate unrelated Chrome processes.
 
 If a packaged macOS build reports `Failed to reserve virtual memory for
 CodeRange`, its bundled Playwright Node driver was signed without the V8 JIT
@@ -427,12 +435,11 @@ want to observe or debug the browser window:
 cloakgpt ask "Reply only: OK." --headed
 ```
 
-If the persistent-session daemon already owns the browser profile, a one-shot
-`ask` automatically opens a temporary new conversation through that daemon
-instead of launching a competing browser. It does not create a persistent
-session record, closes the temporary page after completion, and leaves existing
-persistent sessions running. The daemon's existing browser mode and timezone
-apply while it owns the profile.
+If a session request is currently using the browser profile, a concurrent
+one-shot `ask` automatically queues a temporary new conversation through the
+daemon instead of launching a competing browser. It does not create a
+persistent session record and closes the browser after completion. The
+daemon's configured browser mode and timezone apply to that request.
 
 Text output keeps progress on stderr and writes only the completed answer to
 stdout. Agent runtimes that monitor stdout one line at a time can request a
@@ -468,8 +475,12 @@ cloakgpt ask "First question" --session SESSION_ID
 cloakgpt ask "Follow-up question" --session SESSION_ID
 ```
 
-The first message creates a ChatGPT conversation. Later messages reuse the same
-live page and browser context. Set `CLOAKGPT_SESSION_ID` to omit `--session`:
+The first message creates a ChatGPT conversation. CloakGPT saves its validated
+conversation URL under the local session ID. Every message opens that URL in a
+fresh browser, waits for the complete answer, saves the current URL, and closes
+the page and browser context. This preserves follow-up conversation state
+without keeping Chromium running between commands. Set `CLOAKGPT_SESSION_ID`
+to omit `--session`:
 
 ```sh
 export CLOAKGPT_SESSION_ID=SESSION_ID
@@ -490,8 +501,9 @@ opening the session:
 cloakgpt session open --headed
 ```
 
-One daemon owns one persistent browser profile, so its headed/headless mode and
-timezone cannot change while it is running. Inspect and cleanly close state with:
+One daemon serializes access to one persistent browser profile. Its configured
+headed/headless mode and timezone cannot change while it is running. Inspect
+and cleanly close state with:
 
 ```sh
 cloakgpt session status SESSION_ID
@@ -500,17 +512,15 @@ cloakgpt daemon status
 cloakgpt daemon stop
 ```
 
-The daemon must be stopped before `cloakgpt login` can open the same persistent
-profile. Stopping it preserves session IDs and conversation URLs; after login,
-the next session message starts the daemon and restores the conversation.
+An idle daemon does not own the browser profile, so `cloakgpt login` can open it
+without discarding session IDs. Do not start login while a session request is
+active. If login reports that the profile is already in use, wait for that
+request or stop the daemon; stopping preserves session IDs and conversation
+URLs.
 
-The watchdog keeps an active page warm for two idle hours. After that it closes
-the page to release browser resources but retains the session ID and validated
-conversation URL, so the next `ask --session` restores the conversation. Set
-`CLOAKGPT_SESSION_TTL_SECONDS` to a positive number of seconds to change the
-lease. Browser failures before delivery are retried once on a reconstructed
-page; failures after the send click report `delivery state unknown` and are
-never automatically resent.
+Browser failures before delivery are retried once on a reconstructed page.
+Failures after the send click report `delivery state unknown` and are never
+automatically resent. The browser is closed in both success and error paths.
 
 Status is printed to stderr while only the final response is printed to stdout,
 so responses can be redirected or piped without status lines:

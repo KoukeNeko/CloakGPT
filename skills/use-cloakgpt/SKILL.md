@@ -33,8 +33,9 @@ external ChatGPT conversation, so submit only messages the user requested.
   capture its local conversation ID from stdout, and retain it for later turns.
   The MOTD and status are on stderr.
 - Send every persistent turn with `cloakgpt ask <question> --session <ID>`.
-  The first message creates a ChatGPT conversation; later messages reuse the
-  same live page.
+  The first message creates a ChatGPT conversation; later messages reopen its
+  saved conversation URL. Each request closes its browser after the complete
+  answer, while the session ID remains reusable.
 - Use `cloakgpt ask <question>` without a session for a one-shot new
   conversation. If the persistent daemon already owns the browser profile,
   CloakGPT automatically uses a temporary page in that daemon, closes it after
@@ -78,13 +79,13 @@ cloakgpt ask "What is the weather today?" --timezone Asia/Taipei
 ## Run and collect the response
 
 - Keep the default headless mode for normal work. For a persistent session, add
-  `--headed` only to `session open`; browser mode cannot change while its daemon
-  is running.
+  `--headed` only to `session open`; this selects the mode for each on-demand
+  browser request and cannot change while its daemon is running.
 - Reuse one session ID throughout the same agent task. Do not open multiple
   sessions speculatively or stop the shared daemon.
-- A two-hour idle lease closes a warm page but preserves its session and
-  conversation URL. The next message restores it. Do not present restoration as
-  the exact same live page after the lease expired.
+- A session stores a validated conversation URL, not a live page. Every turn
+  restores that URL and closes Chromium after collecting the full answer. Do
+  not describe it as the exact same browser page or process.
 - Do not impose an arbitrary response timeout. ChatGPT generation and web search
   can take an unknown amount of time. Keep waiting while the process reports
   progress; stop with Ctrl+C only at the user's request or when cancellation is
@@ -115,16 +116,17 @@ Use the least invasive recovery step:
    `cloakgpt browser doctor`, then report the diagnostic and any named
    environment variable. Do not guess credentials or license values.
 4. If ChatGPT requires authentication, ask the user to complete
-   `cloakgpt login` in its visible browser window. A running daemon owns the same
-   profile, so obtain permission to stop it first; stopping preserves session
-   IDs and conversation URLs. Never enter, request, or expose their ChatGPT
+   `cloakgpt login` in its visible browser window. An idle daemon does not hold
+   the browser profile; if a session request is active, wait for it to finish or
+   obtain permission before stopping the daemon. Stopping preserves session IDs
+   and conversation URLs. Never enter, request, or expose their ChatGPT
    password, cookies, browser storage, or daemon authentication material.
 5. If CloakGPT says the browser profile is already in use, or an older build
    dumps a Chromium error ending in `exitCode=21`, run `cloakgpt daemon status`.
-   Reuse the known session ID if that daemon owns the intended conversation;
-   otherwise obtain permission before stopping it. If no daemon is running,
-   ask the user to close the CloakGPT Chromium window. Do not delete profile
-   lock files or terminate unrelated Chrome processes.
+   Wait for an active request when it owns the profile; otherwise obtain
+   permission before stopping it. If no daemon is running, ask the user to
+   close the CloakGPT Chromium window. Do not delete profile lock files or
+   terminate unrelated Chrome processes.
 6. For a headless page-state failure, retry once with `--headed` only when a
    visible diagnostic run is acceptable. Persistent sessions require stopping
    the daemon before changing browser mode; do not stop it without permission.
@@ -144,16 +146,21 @@ Use `--channel stable`, `--channel prerelease`, or `--version TAG` only when the
 user selected that target; `--channel` and `--version` are mutually exclusive.
 
 An actual update verifies the downloaded release, stops the daemon, and
-preserves the browser profile and persistent session records. Tell the user if
-stopping an active daemon will close a warm browser page. On Windows, the
-command stages a hidden updater and replacement finishes just after the command
-exits. Verify the result with `cloakgpt --version`; if it still reports the old
-version, retry briefly for up to 10 seconds and report any update failure shown
-by the next invocation.
+preserves the browser profile and persistent session records. Wait for an
+active request before updating. On Windows, the command stages a hidden updater
+and replacement finishes just after the command exits. Verify the result with
+`cloakgpt --version`; if it still reports the old version, retry briefly for up
+to 10 seconds and report any update failure shown by the next invocation.
 
 Self-update works only for packaged releases. If a source checkout refuses it,
 do not overwrite files or run `git pull` across uncommitted changes; report the
 checkout and update it through its normal Git workflow when authorized.
+CloakGPT packages a CA bundle and keeps HTTPS certificate verification enabled.
+For a TLS interception proxy, use a user- or administrator-provided PEM bundle
+through `SSL_CERT_FILE`; never disable verification or invent a certificate
+path. If an older packaged build cannot self-update because its CA bundle is
+missing, use the authorized official installer to bootstrap the selected
+release while preserving profile and session data.
 CloakBrowser is separate. Run `cloakgpt browser update` only when the user also
 requested a browser update or a diagnosed compatibility problem requires it.
 
