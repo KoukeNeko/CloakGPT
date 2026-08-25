@@ -8,11 +8,30 @@ description: Use, update, or completely uninstall CloakGPT when the user asks an
 Use CloakGPT as a user-authorized browser client. Sending a prompt changes an
 external ChatGPT conversation, so submit only messages the user requested.
 
+## Trust and security boundaries
+
+- The canonical source is `https://github.com/KoukeNeko/CloakGPT`. Use only its
+  official installers and GitHub Releases. The installers download the selected
+  platform asset and its `.sha256` file, then verify the checksum before
+  installation. macOS release assets are Developer ID signed and notarized;
+  Windows assets are not currently code-signed and may show a platform warning.
+- CloakBrowser is a separately downloaded external binary with its own license
+  and trust boundary. Do not describe it as bundled into CloakGPT or covered by
+  CloakGPT's MIT License.
+- CloakGPT intentionally controls a signed-in browser and can send messages to
+  ChatGPT. Treat an agent allowed to execute it as authorized only for the
+  operations the user requested. Never use it to bypass account controls.
+- A persistent session ID is a local conversation selector, not a ChatGPT
+  credential or the daemon authentication key. The separate daemon key remains
+  in the local CloakGPT data directory and is never printed by normal commands.
+  Keep session IDs out of final answers because they are local conversation
+  metadata, even though they are not authentication secrets.
+
 ## Choose the operation
 
 - For repeated messages in one agent task, run `cloakgpt session open` once,
-  capture the session ID from stdout, and retain it for later turns. The MOTD and
-  status are on stderr.
+  capture its local conversation ID from stdout, and retain it for later turns.
+  The MOTD and status are on stderr.
 - Send every persistent turn with `cloakgpt ask <question> --session <ID>`.
   The first message creates a ChatGPT conversation; later messages reuse the
   same live page.
@@ -96,7 +115,7 @@ Use the least invasive recovery step:
    `cloakgpt login` in its visible browser window. A running daemon owns the same
    profile, so obtain permission to stop it first; stopping preserves session
    IDs and conversation URLs. Never enter, request, or expose their ChatGPT
-   password, cookies, or session tokens.
+   password, cookies, browser storage, or daemon authentication material.
 5. If CloakGPT says the browser profile is already in use, or an older build
    dumps a Chromium error ending in `exitCode=21`, run `cloakgpt daemon status`.
    Reuse the known session ID if that daemon owns the intended conversation;
