@@ -157,11 +157,11 @@ to `stable`; interactive installs show a numbered choice. To install an exact
 tag or choose another directory, use:
 
 ```sh
-CLOAKGPT_VERSION=v0.1.0-pre.9 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
+CLOAKGPT_VERSION=v0.1.0-pre.10 CLOAKGPT_INSTALL_DIR="$HOME/bin" sh install.sh
 ```
 
 ```powershell
-.\install.ps1 -Version v0.1.0-pre.9 -InstallDir D:\Tools\CloakGPT
+.\install.ps1 -Version v0.1.0-pre.10 -InstallDir D:\Tools\CloakGPT
 ```
 
 An exact `CLOAKGPT_VERSION` or `-Version` takes precedence over the channel.
@@ -205,7 +205,7 @@ stable channel unless one is selected explicitly:
 ```sh
 cloakgpt update --channel stable
 cloakgpt update --channel prerelease
-cloakgpt update --version v0.1.0-pre.9
+cloakgpt update --version v0.1.0-pre.10
 ```
 
 `--channel` and `--version` cannot be combined. Exact versions may upgrade or
