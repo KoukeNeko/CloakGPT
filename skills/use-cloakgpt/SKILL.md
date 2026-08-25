@@ -163,13 +163,13 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Yes
 Remove-Item .\uninstall.ps1
 ```
 
-The script stops the daemon, uses the Agent Skills CLI when available, removes
-known skill paths as a fallback, and honors the documented CloakGPT directory
-environment overrides. Report any safety refusal or skill-removal warning; do
-not claim a complete uninstall while one remains. Because the current skill is
-deleted during the operation, finish verification from these already-loaded
-instructions and tell the user to restart their agent so its in-memory skill
-list is refreshed.
+The script stops the daemon, asks the Agent Skills CLI to find and remove every
+global `use-cloakgpt` agent link when available, removes known skill paths as a
+fallback, and honors the documented CloakGPT directory environment overrides.
+Report any safety refusal or skill-removal warning; do not claim a complete
+uninstall while one remains. Because the current skill is deleted during the
+operation, finish verification from these already-loaded instructions and tell
+the user to restart their agent so its in-memory skill list is refreshed.
 
 Do not run `browser clear-cache`, log out, delete the profile, or overwrite
 `CLOAKGPT_DATA_DIR` unless the user explicitly requests that destructive state

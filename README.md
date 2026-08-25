@@ -347,10 +347,10 @@ executable destination was used. The uninstaller also honors
 `CLOAKGPT_DATA_DIR`, `CLOAKBROWSER_CACHE_DIR`, `CODEX_HOME`, `XDG_DATA_HOME`,
 and the platform defaults documented under [User data](#user-data).
 
-When `npx` is available, the script asks the official Agent Skills CLI to
-remove `use-cloakgpt` globally from all supported agents, then removes known
-native skill paths as a fallback. Restart a running agent after uninstalling so
-its in-memory skill list is refreshed.
+When `npx` is available, the script asks the official Agent Skills CLI to find
+and remove every global `use-cloakgpt` agent link, then removes known native
+skill paths as a fallback. Restart a running agent after uninstalling so its
+in-memory skill list is refreshed.
 
 ## Login
 
