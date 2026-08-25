@@ -10,6 +10,7 @@ sources.
 
 ## Table of contents
 
+- [Requirements](#requirements)
 - [Install a release](#install-a-release)
   - [Linux and macOS](#linux-and-macos)
   - [Windows](#windows)
@@ -30,6 +31,35 @@ sources.
   - [macOS release signing](#macos-release-signing)
 - [License](#license)
 - [Disclaimer](#disclaimer)
+
+## Requirements
+
+For a packaged release:
+
+| Requirement | Details |
+| --- | --- |
+| Operating system | 64-bit Linux, macOS, or Windows on an architecture listed under [Release options and assets](#release-options-and-assets). CloakBrowser is downloaded separately, so its current platform availability is checked during `cloakgpt browser install`. |
+| Network | HTTPS access to GitHub Releases and API, CloakBrowser's official download/license service, and `chatgpt.com`. A TLS-intercepting network must provide its trusted PEM bundle through `SSL_CERT_FILE`. |
+| Account | A user-owned ChatGPT account that can sign in at `chatgpt.com`. Available models, reasoning levels, and web search depend on that account and ChatGPT's current product rules. |
+| External browser | Permission to download and use CloakBrowser under its separate terms. A license key may be required by the selected CloakBrowser build or plan; `cloakgpt browser info --quick` reports the local state. |
+| Interactive login | A graphical desktop session is required for the initial visible `cloakgpt login` flow. Normal `ask` commands are headless by default after login is saved. |
+| Storage | Plan for at least 500 MB of free space. The CloakGPT executable is separate from the external Chromium download, which CloakBrowser currently describes as approximately 200 MB cached; profiles and multiple cached browser versions need additional space. |
+| Installer tooling | Linux/macOS: a POSIX shell, standard utilities including `awk`, `mktemp`, and `install`, `curl`, and either `sha256sum` or `shasum`. Windows: PowerShell with `Invoke-WebRequest` and `Get-FileHash`. |
+
+Current CI builds and tests on Ubuntu 24.04, macOS 15, Windows Server 2025
+(x86-64), and Windows 11 ARM. These are verified environments, not a formal
+minimum-version guarantee for the independently downloaded Chromium binary.
+
+The packaged executable already contains Python, the CloakBrowser Python
+wrapper, Playwright, and the CA certificates used by the updater. Python,
+`pip`, Node.js, `npx`, and Git are **not** required to run CloakGPT. CloakBrowser
+itself remains an external binary with its own
+[availability, license, and usage terms](https://cloakbrowser.dev/).
+
+Installing the recommended agent skill additionally needs Node.js/`npx`, the
+GitHub CLI fallback, or a compatible agent's manual skill-install mechanism.
+Running from source requires Python 3.11, `venv`, and `pip`; building a packaged
+executable also installs the dependencies in `requirements-build.txt`.
 
 ## Install a release
 
