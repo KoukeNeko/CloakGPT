@@ -381,6 +381,42 @@ class ChatGPTBrowserTests(unittest.TestCase):
         )
         self.send_button.click.assert_awaited_once_with()
 
+    def test_waits_for_composer_and_delayed_status_control(self) -> None:
+        composer_ready = False
+        status_control_ready = False
+
+        async def wait_for_editor(**_kwargs):
+            nonlocal composer_ready
+            composer_ready = True
+
+        async def wait_for_status(**_kwargs):
+            nonlocal status_control_ready
+            self.assertTrue(composer_ready)
+            status_control_ready = True
+
+        async def status_count():
+            return 1 if status_control_ready else 0
+
+        self.editor.wait_for.side_effect = wait_for_editor
+        self.reasoning_trigger.wait_for.side_effect = wait_for_status
+        self.reasoning_trigger.count.side_effect = status_count
+
+        answer = chatgpt_browser.start_conversation(
+            "hi",
+            profile_dir=self.profile_dir,
+        )
+
+        self.assertEqual(answer, "OK.")
+        self.editor.wait_for.assert_awaited_once_with(
+            state="visible",
+            timeout=30_000,
+        )
+        self.reasoning_trigger.wait_for.assert_awaited_once_with(
+            state="visible",
+            timeout=10_000,
+        )
+        self.send_button.click.assert_awaited_once_with()
+
     def test_japanese_inline_menu_accepts_existing_high_reasoning(self) -> None:
         self.submenu_items.count.return_value = 0
         self.inline_reasoning_controls.count.return_value = 1

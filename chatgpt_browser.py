@@ -622,9 +622,9 @@ async def _close_advanced_menus(page) -> None:
 
 async def _read_page_status(page) -> ChatGPTPageStatus:
     trigger = page.locator(REASONING_TRIGGER_SELECTOR)
+    await trigger.wait_for(state="visible", timeout=10_000)
     if await trigger.count() != 1:
         return ChatGPTPageStatus(page.url, "unknown", "unknown")
-    await trigger.wait_for(state="visible", timeout=10_000)
     reasoning_text = (await trigger.inner_text()).strip()
     reasoning = next(
         (
@@ -795,6 +795,9 @@ async def send_message_on_page(
         await page.goto(url, wait_until="domcontentloaded")
 
     async with composer_lock or _without_composer_lock():
+        editor = page.locator(PROMPT_EDITOR_SELECTOR)
+        await editor.wait_for(state="visible", timeout=30_000)
+
         if model is not None:
             _emit_status(status_callback, f"Selecting model: {model}")
             await _set_model(page, model)
@@ -808,8 +811,6 @@ async def send_message_on_page(
             f"Current page: model={status.model}, reasoning={status.reasoning}, url={status.url}",
         )
 
-        editor = page.locator(PROMPT_EDITOR_SELECTOR)
-        await editor.wait_for(state="visible", timeout=30_000)
         previous_count = await page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
         _emit_status(status_callback, "Typing message...")
         await _type_question_like_human(editor, question)
