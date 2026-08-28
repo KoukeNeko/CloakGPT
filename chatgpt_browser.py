@@ -3,6 +3,7 @@
 import asyncio
 import os
 import platform
+import random
 import re
 from contextlib import asynccontextmanager
 import sys
@@ -28,11 +29,27 @@ REASONING_TRIGGER_SELECTOR = (
 ADVANCED_VIEW_SELECTOR = '[role="menuitem"][aria-label="詳細表示にする"]'
 REASONING_SUBMENU_ITEM_SELECTOR = '[role="menuitem"][aria-haspopup="menu"]'
 REASONING_OPTION_SELECTOR = '[role="menuitemradio"]'
+INLINE_REASONING_SELECTOR = (
+    '[role="slider"][aria-valuenow], '
+    '[aria-valuenow][aria-valuemin][aria-valuemax], '
+    '[aria-posinset][aria-setsize]:not([role="menuitemradio"])'
+)
 PROFILE_IN_USE_MARKERS = (
     "exitCode=21",
     "Opening in existing browser session",
     "既存のブラウザ セッションで開いています",
 )
+HUMAN_TYPING_TARGET_DURATION_MS = 4_500
+HUMAN_TYPING_MIN_DELAY_MS = 6
+HUMAN_TYPING_MAX_DELAY_MS = 90
+HUMAN_TYPING_JITTER = 0.35
+KEEPALIVE_SCROLL_MIN_INTERVAL_SECONDS = 8.0
+KEEPALIVE_SCROLL_MAX_INTERVAL_SECONDS = 18.0
+KEEPALIVE_SCROLL_MIN_DISTANCE = 120
+KEEPALIVE_SCROLL_MAX_DISTANCE = 360
+KEEPALIVE_SCROLL_MIN_RETURN_DELAY_SECONDS = 0.2
+KEEPALIVE_SCROLL_MAX_RETURN_DELAY_SECONDS = 0.7
+KEEPALIVE_SCROLL_SKIP_CHANCE = 0.4
 
 
 class StringEnum(str, Enum):
@@ -332,6 +349,66 @@ def _validate_question(question: str) -> None:
         raise ValueError("question must not be empty")
 
 
+def _human_typing_delay_range(question: str) -> tuple[int, int]:
+    average_delay = max(
+        HUMAN_TYPING_MIN_DELAY_MS,
+        min(
+            HUMAN_TYPING_MAX_DELAY_MS,
+            HUMAN_TYPING_TARGET_DURATION_MS / len(question),
+        ),
+    )
+    minimum_delay = max(
+        HUMAN_TYPING_MIN_DELAY_MS,
+        round(average_delay * (1 - HUMAN_TYPING_JITTER)),
+    )
+    maximum_delay = min(
+        HUMAN_TYPING_MAX_DELAY_MS,
+        round(average_delay * (1 + HUMAN_TYPING_JITTER)),
+    )
+    return minimum_delay, maximum_delay
+
+
+async def _type_question_like_human(editor, question: str) -> None:
+    await editor.fill("")
+    await editor.focus()
+    minimum_delay, maximum_delay = _human_typing_delay_range(question)
+    for character in question:
+        await editor.press_sequentially(
+            character,
+            delay=random.randint(minimum_delay, maximum_delay),
+        )
+
+
+async def _keep_page_active(page) -> None:
+    scroll_deferred = False
+    while True:
+        await asyncio.sleep(
+            random.uniform(
+                KEEPALIVE_SCROLL_MIN_INTERVAL_SECONDS,
+                KEEPALIVE_SCROLL_MAX_INTERVAL_SECONDS,
+            )
+        )
+        if not scroll_deferred and random.random() < KEEPALIVE_SCROLL_SKIP_CHANCE:
+            scroll_deferred = True
+            continue
+        scroll_deferred = False
+        distance = random.randint(
+            KEEPALIVE_SCROLL_MIN_DISTANCE,
+            KEEPALIVE_SCROLL_MAX_DISTANCE,
+        )
+        try:
+            await page.mouse.wheel(0, -distance)
+            await asyncio.sleep(
+                random.uniform(
+                    KEEPALIVE_SCROLL_MIN_RETURN_DELAY_SECONDS,
+                    KEEPALIVE_SCROLL_MAX_RETURN_DELAY_SECONDS,
+                )
+            )
+            await page.mouse.wheel(0, distance)
+        except Exception:
+            return
+
+
 def _validate_conversation_url(url: str) -> None:
     parsed_url = urlparse(url)
     if (
@@ -444,34 +521,42 @@ async def _wait_for_reply(
     previous_count: int,
     status_callback: StatusCallback | None,
 ) -> str:
-    await page.wait_for_function(
-        """previousCount =>
-        document.querySelectorAll('[data-message-author-role="assistant"]').length
-        > previousCount""",
-        arg=previous_count,
-        timeout=0,
-    )
-    _emit_status(status_callback, "ChatGPT is responding...")
-    response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
-    turn_id = await response.evaluate(TURN_ID_SCRIPT)
-    previous_status = None
-    while True:
-        state = await page.evaluate(
-            RESPONSE_STATE_SCRIPT,
-            {"previousCount": previous_count, "turnId": turn_id},
+    keepalive_task = asyncio.create_task(_keep_page_active(page))
+    try:
+        await page.wait_for_function(
+            """previousCount =>
+            document.querySelectorAll('[data-message-author-role="assistant"]').length
+            > previousCount""",
+            arg=previous_count,
+            timeout=0,
         )
-        current_status = state["status"]
-        if current_status and current_status != previous_status:
-            _emit_status(status_callback, f"ChatGPT activity: {current_status}")
-            previous_status = current_status
-        if state["complete"]:
-            break
-        await page.wait_for_timeout(250)
+        _emit_status(status_callback, "ChatGPT is responding...")
+        response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
+        turn_id = await response.evaluate(TURN_ID_SCRIPT)
+        previous_status = None
+        while True:
+            state = await page.evaluate(
+                RESPONSE_STATE_SCRIPT,
+                {"previousCount": previous_count, "turnId": turn_id},
+            )
+            current_status = state["status"]
+            if current_status and current_status != previous_status:
+                _emit_status(status_callback, f"ChatGPT activity: {current_status}")
+                previous_status = current_status
+            if state["complete"]:
+                break
+            await page.wait_for_timeout(250)
+    finally:
+        keepalive_task.cancel()
+        try:
+            await keepalive_task
+        except asyncio.CancelledError:
+            pass
     _emit_status(status_callback, "Collecting response and sources...")
     return await _extract_response(page)
 
 
-async def _open_advanced_submenu(page, submenu_index: int, menu_name: str):
+async def _open_configuration_menu(page):
     trigger = page.locator(REASONING_TRIGGER_SELECTOR)
     await trigger.wait_for(state="visible", timeout=10_000)
     await trigger.click()
@@ -481,15 +566,53 @@ async def _open_advanced_submenu(page, submenu_index: int, menu_name: str):
     advanced_view = root_menu.locator(ADVANCED_VIEW_SELECTOR)
     if await advanced_view.count():
         await advanced_view.click()
+    return trigger, root_menu
 
-    submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
-    if await submenu_items.count() <= submenu_index:
-        available = " ".join((await root_menu.inner_text()).split())
-        raise ValueError(f"{menu_name} menu is unavailable; menu: {available}")
 
-    await submenu_items.nth(submenu_index).click()
-    submenu = page.locator('[role="menu"]:visible').last
-    return trigger, submenu
+async def _reasoning_index_from_control(control) -> int | None:
+    value = await control.get_attribute("aria-valuenow")
+    minimum = await control.get_attribute("aria-valuemin")
+    if value is not None:
+        try:
+            index = round(float(value) - float(minimum or 0))
+        except ValueError:
+            pass
+        else:
+            if index in REASONING_LEVEL_INDEXES.values():
+                return index
+
+    position = await control.get_attribute("aria-posinset")
+    if position is not None:
+        try:
+            index = int(position) - 1
+        except ValueError:
+            pass
+        else:
+            if index in REASONING_LEVEL_INDEXES.values():
+                return index
+    return None
+
+
+async def _inline_reasoning_control(menu):
+    controls = menu.locator(INLINE_REASONING_SELECTOR)
+    if await controls.count() != 1:
+        return None
+    return controls.first
+
+
+async def _selected_model_from_menu(menu) -> str | None:
+    options = menu.locator(REASONING_OPTION_SELECTOR)
+    for label in MODEL_LABELS.values():
+        matches = options.filter(has_text=label)
+        for index in range(await matches.count()):
+            option = matches.nth(index)
+            if (
+                await option.get_attribute("aria-checked") == "true"
+                or await option.get_attribute("data-state") == "checked"
+                or await option.get_attribute("aria-current") == "true"
+            ):
+                return label
+    return None
 
 
 async def _close_advanced_menus(page) -> None:
@@ -499,6 +622,8 @@ async def _close_advanced_menus(page) -> None:
 
 async def _read_page_status(page) -> ChatGPTPageStatus:
     trigger = page.locator(REASONING_TRIGGER_SELECTOR)
+    if await trigger.count() != 1:
+        return ChatGPTPageStatus(page.url, "unknown", "unknown")
     await trigger.wait_for(state="visible", timeout=10_000)
     reasoning_text = (await trigger.inner_text()).strip()
     reasoning = next(
@@ -513,10 +638,19 @@ async def _read_page_status(page) -> ChatGPTPageStatus:
     try:
         root_menu = page.locator('[role="menu"]:visible').first
         await root_menu.wait_for(state="visible", timeout=10_000)
+        inline_reasoning = await _inline_reasoning_control(root_menu)
+        if inline_reasoning is not None:
+            reasoning_index = await _reasoning_index_from_control(inline_reasoning)
+            if reasoning_index is not None:
+                reasoning = list(ReasoningLevel)[reasoning_index].value
+
+        selected_model = await _selected_model_from_menu(root_menu)
+        if selected_model is not None:
+            return ChatGPTPageStatus(page.url, selected_model, reasoning)
+
         submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
         if await submenu_items.count() < 2:
-            available = " ".join((await root_menu.inner_text()).split())
-            raise ValueError(f"ChatGPT status is unavailable; menu: {available}")
+            return ChatGPTPageStatus(page.url, "unknown", reasoning)
 
         model_text = " ".join((await submenu_items.nth(0).inner_text()).split())
         model = next(
@@ -528,9 +662,57 @@ async def _read_page_status(page) -> ChatGPTPageStatus:
         await page.keyboard.press("Escape")
 
 
+class ChatGPTDOMChangedError(RuntimeError):
+    """ChatGPT's model/reasoning controls cannot be identified safely."""
+
+
+def _unknown_status_message(status: ChatGPTPageStatus) -> str:
+    return (
+        "ChatGPT's model/reasoning controls could not be identified; the "
+        "ChatGPT UI or DOM may have changed. No message was sent. "
+        f"Detected model={status.model!r}, reasoning={status.reasoning!r}. "
+        "Update CloakGPT and retry; if it is already up to date, report the "
+        "current model/reasoning menu DOM."
+    )
+
+
+async def _read_page_status_required(page) -> ChatGPTPageStatus:
+    try:
+        status = await _read_page_status(page)
+    except Exception as exc:
+        try:
+            await page.keyboard.press("Escape")
+        except Exception:
+            pass
+        status = ChatGPTPageStatus(page.url, "unknown", "unknown")
+        raise ChatGPTDOMChangedError(_unknown_status_message(status)) from exc
+
+    known_models = set(MODEL_LABELS.values())
+    known_reasoning = {level.value for level in ReasoningLevel}
+    if status.model not in known_models or status.reasoning not in known_reasoning:
+        raise ChatGPTDOMChangedError(_unknown_status_message(status))
+    return status
+
+
 async def _set_model(page, model: ChatGPTModel) -> None:
     label = MODEL_LABELS[model]
-    _, model_menu = await _open_advanced_submenu(page, 0, "model")
+    _, root_menu = await _open_configuration_menu(page)
+    inline_options = root_menu.locator(REASONING_OPTION_SELECTOR)
+    inline_matches = inline_options.filter(has_text=label)
+    if await inline_matches.count() == 1:
+        option = inline_matches.first
+        if await option.get_attribute("aria-checked") == "true":
+            await _close_advanced_menus(page)
+            return
+        await option.click()
+        return
+
+    submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
+    if await submenu_items.count() < 1:
+        available = " ".join((await root_menu.inner_text()).split())
+        raise ValueError(f"model {label!r} is unavailable; menu: {available}")
+    await submenu_items.nth(0).click()
+    model_menu = page.locator('[role="menu"]:visible').last
     options = model_menu.locator(REASONING_OPTION_SELECTOR)
     matches = options.filter(has_text=label)
     if await matches.count() != 1:
@@ -546,7 +728,30 @@ async def _set_model(page, model: ChatGPTModel) -> None:
 
 async def _set_reasoning_level(page, reasoning_level: ReasoningLevel) -> None:
     option_index = REASONING_LEVEL_INDEXES[reasoning_level]
-    trigger, reasoning_menu = await _open_advanced_submenu(page, 1, "reasoning")
+    trigger, root_menu = await _open_configuration_menu(page)
+    inline_reasoning = await _inline_reasoning_control(root_menu)
+    if inline_reasoning is not None:
+        current_index = await _reasoning_index_from_control(inline_reasoning)
+        if current_index == option_index:
+            await _close_advanced_menus(page)
+            return
+        for _ in REASONING_LEVEL_INDEXES:
+            await inline_reasoning.press("ArrowLeft")
+        for _ in range(option_index):
+            await inline_reasoning.press("ArrowRight")
+        for _ in range(50):
+            if await _reasoning_index_from_control(inline_reasoning) == option_index:
+                await _close_advanced_menus(page)
+                return
+            await page.wait_for_timeout(100)
+        raise RuntimeError("ChatGPT did not apply the selected reasoning level")
+
+    submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
+    if await submenu_items.count() < 2:
+        available = " ".join((await root_menu.inner_text()).split())
+        raise ValueError(f"reasoning menu is unavailable; menu: {available}")
+    await submenu_items.nth(1).click()
+    reasoning_menu = page.locator('[role="menu"]:visible').last
     options = reasoning_menu.locator(REASONING_OPTION_SELECTOR)
     if await options.count() <= option_index:
         available = " ".join((await reasoning_menu.inner_text()).split())
@@ -597,7 +802,7 @@ async def send_message_on_page(
             _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
             await _set_reasoning_level(page, reasoning_level)
 
-        status = await _read_page_status(page)
+        status = await _read_page_status_required(page)
         _emit_status(
             status_callback,
             f"Current page: model={status.model}, reasoning={status.reasoning}, url={status.url}",
@@ -606,7 +811,8 @@ async def send_message_on_page(
         editor = page.locator(PROMPT_EDITOR_SELECTOR)
         await editor.wait_for(state="visible", timeout=30_000)
         previous_count = await page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
-        await editor.fill(question)
+        _emit_status(status_callback, "Typing message...")
+        await _type_question_like_human(editor, question)
 
         send_button = page.locator(SEND_BUTTON_SELECTOR)
         await send_button.wait_for(state="visible", timeout=10_000)
