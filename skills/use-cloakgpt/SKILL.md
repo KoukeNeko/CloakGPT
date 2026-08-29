@@ -150,8 +150,10 @@ Use the least invasive recovery step:
    or daemon authentication material.
 5. If CloakGPT says the browser profile is already in use, or an older build
    dumps a Chromium error ending in `exitCode=21`, run `cloakgpt daemon status`.
-   Wait for an active request when it owns the profile; otherwise obtain
-   permission before stopping it. `cloakgpt daemon stop` refuses while requests
+   It succeeds either way: `{"running": false}` means no daemon exists, which is
+   an ordinary state and not a failure to report or retry. Wait for an active
+   request when it owns the profile; otherwise obtain permission before stopping
+   it. `cloakgpt daemon stop` refuses while requests
    are still running and says so; treat that as the request still being alive
    and wait. `cloakgpt daemon stop --force` abandons those requests and closes
    the browser, so use it only for work that can no longer finish and only with

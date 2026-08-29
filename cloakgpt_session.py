@@ -112,6 +112,10 @@ class DaemonUnavailableError(RuntimeError):
     """The daemon cannot be reached, so there is nothing to talk to."""
 
 
+class DaemonNotRunningError(DaemonUnavailableError):
+    """No daemon is running, which is an ordinary state rather than a fault."""
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -465,6 +469,7 @@ class SessionBroker:
         operation = request.get("operation")
         if operation == "ping":
             return {
+                "running": True,
                 "pid": os.getpid(),
                 "headless": self.headless,
                 "timezone": self.timezone,
@@ -738,7 +743,7 @@ def request_broker(
         else _load_metadata(data_dir)
     )
     if metadata is None:
-        raise DaemonUnavailableError("CloakGPT daemon is not running")
+        raise DaemonNotRunningError("CloakGPT daemon is not running")
     try:
         auth_key = base64.b64decode(metadata["auth_key"], validate=True)
         connection = Client(

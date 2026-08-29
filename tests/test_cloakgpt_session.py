@@ -532,6 +532,23 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("ttl_seconds", daemon)
         self.assertNotIn("ttl_seconds", self.broker.session_status(session_id))
 
+    async def test_status_states_that_the_daemon_is_running(self) -> None:
+        daemon = await self.broker.dispatch({"operation": "ping"}, Mock())
+
+        # A stopped daemon reports the same field as false, so one field
+        # answers the question in both cases.
+        self.assertIs(daemon["running"], True)
+
+    async def test_missing_daemon_is_distinguishable_from_an_unreachable_one(
+        self,
+    ) -> None:
+        self.assertTrue(
+            issubclass(
+                cloakgpt_session.DaemonNotRunningError,
+                cloakgpt_session.DaemonUnavailableError,
+            )
+        )
+
     @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
     async def test_one_shot_allows_a_signed_out_profile(self, send) -> None:
         send.return_value = ("OK.", cloakgpt_session.CHATGPT_URL)

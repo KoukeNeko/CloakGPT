@@ -18,7 +18,12 @@ from chatgpt_browser import (
     ReasoningLevel,
     launch_chatgpt_context,
 )
-from cloakgpt_session import DaemonUnavailableError, request_broker, run_broker
+from cloakgpt_session import (
+    DaemonNotRunningError,
+    DaemonUnavailableError,
+    request_broker,
+    run_broker,
+)
 from cloakgpt_update import (
     consume_windows_update_result,
     update_cloakgpt,
@@ -367,13 +372,29 @@ def _run_session_command(args) -> int:
     return 0
 
 
+STOPPED_DAEMON_STATUS = {"running": False}
+ALREADY_STOPPED_RESULT = {"stopped": True, "already_stopped": True}
+
+
 def _run_daemon_control(command: str, force: bool) -> int:
     request = (
         {"operation": "ping"}
         if command == "status"
         else {"operation": "stop", "force": force}
     )
-    result = request_broker(request, auto_start=False)
+    try:
+        result = request_broker(request, auto_start=False)
+        if command == "status":
+            # Older daemons predate the field, so state it from the reply itself.
+            result = {"running": True, **result}
+    except DaemonNotRunningError:
+        # An absent daemon is an ordinary state: reporting it is what `status`
+        # is for, and stopping what is already stopped is what was asked.
+        result = (
+            STOPPED_DAEMON_STATUS
+            if command == "status"
+            else ALREADY_STOPPED_RESULT
+        )
     print(json.dumps(result, indent=2))
     return 0
 

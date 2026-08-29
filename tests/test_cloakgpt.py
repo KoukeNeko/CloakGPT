@@ -290,6 +290,65 @@ class CloakGPTCliTests(unittest.TestCase):
         )
 
     @patch("cloakgpt.request_broker")
+    def test_status_reports_a_stopped_daemon_as_normal_output(self, request) -> None:
+        request.side_effect = cloakgpt.DaemonNotRunningError(
+            "CloakGPT daemon is not running"
+        )
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        with redirect_stdout(output), redirect_stderr(errors):
+            result = cloakgpt.main(["daemon", "status"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output.getvalue()), {"running": False})
+        self.assertEqual(errors.getvalue(), "")
+
+    @patch("cloakgpt.request_broker")
+    def test_status_marks_a_reachable_daemon_as_running(self, request) -> None:
+        # An older daemon predates the field, so the CLI supplies it.
+        request.return_value = {"pid": 7, "browser": "stopped"}
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = cloakgpt.main(["daemon", "status"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {"running": True, "pid": 7, "browser": "stopped"},
+        )
+
+    @patch("cloakgpt.request_broker")
+    def test_stopping_a_stopped_daemon_succeeds(self, request) -> None:
+        request.side_effect = cloakgpt.DaemonNotRunningError(
+            "CloakGPT daemon is not running"
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output), redirect_stderr(io.StringIO()):
+            result = cloakgpt.main(["daemon", "stop"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {"stopped": True, "already_stopped": True},
+        )
+
+    @patch("cloakgpt.request_broker")
+    def test_an_unreachable_daemon_is_still_an_error(self, request) -> None:
+        request.side_effect = cloakgpt.DaemonUnavailableError(
+            "could not connect to the CloakGPT daemon (pid 42)"
+        )
+        errors = io.StringIO()
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(errors):
+            result = cloakgpt.main(["daemon", "status"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("pid 42", errors.getvalue())
+
+    @patch("cloakgpt.request_broker")
     def test_one_shot_ask_uses_shared_daemon(self, request) -> None:
         request.return_value = {"answer": "New conversation answer"}
         output = io.StringIO()

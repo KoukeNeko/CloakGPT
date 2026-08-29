@@ -586,6 +586,13 @@ cloakgpt daemon stop --force
 and open-page counts. `session status` reports that session's running and queued
 request counts.
 
+A daemon starts on demand and does not always exist, so `daemon status` treats
+its absence as an answer rather than a failure: it prints `{"running": false}`
+and exits successfully, and a reachable daemon reports `"running": true`
+alongside the rest of its state. Stopping a daemon that is already stopped
+likewise succeeds, reporting `"already_stopped": true`. A daemon that is running
+but cannot be reached remains an error, and names the process to end.
+
 `daemon stop` waits a short while for running requests to finish. If any are
 still running it refuses to stop and leaves the daemon serving them, so a long
 response is never cut off by accident. `daemon stop --force` closes the browser
