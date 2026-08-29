@@ -31,6 +31,7 @@ from chatgpt_browser import (
 
 
 STOP_DRAIN_TIMEOUT_SECONDS = 30
+DISCONNECT_POLL_SECONDS = 1.0
 FORCED_STOP_GRACE_SECONDS = 5
 SHUTDOWN_TASK_TIMEOUT_SECONDS = 10
 METADATA_NAME = "cloakgpt-daemon.json"
@@ -53,6 +54,57 @@ def _endpoint(data_dir: Path) -> tuple[str, str]:
     if os.name == "nt":
         return "AF_PIPE", rf"\\.\pipe\cloakgpt-{digest}"
     return "AF_UNIX", str(Path(tempfile.gettempdir()) / f"cloakgpt-{digest}.sock")
+
+
+class ClientGoneError(Exception):
+    """The client stopped waiting, so its request no longer has a destination."""
+
+
+async def _watch_for_disconnect(connection) -> None:
+    """Return once the client closes its end of the connection."""
+    while True:
+        # The protocol sends nothing after the initial request, so anything that
+        # makes the connection readable -- an EOF above all -- means it is over.
+        # Polling without blocking keeps one long request from owning a thread.
+        try:
+            if connection.poll(0):
+                return
+        except (OSError, EOFError, ValueError):
+            return
+        await asyncio.sleep(DISCONNECT_POLL_SECONDS)
+
+
+async def _dispatch_until_client_leaves(
+    broker,
+    request: dict[str, Any],
+    events: asyncio.Queue[Any],
+    connection,
+) -> dict[str, Any]:
+    work = asyncio.create_task(
+        broker.dispatch(
+            request,
+            lambda message: events.put_nowait(
+                {"type": "status", "message": message}
+            ),
+        )
+    )
+    watcher = asyncio.create_task(_watch_for_disconnect(connection))
+    done, _pending = await asyncio.wait(
+        {work, watcher},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if work in done:
+        watcher.cancel()
+        return work.result()
+
+    work.cancel()
+    # Wait for the cancelled request to run its own cleanup, so the page it
+    # holds is released before this connection is dropped.
+    try:
+        await work
+    except asyncio.CancelledError:
+        pass
+    raise ClientGoneError("the client stopped waiting for this request")
 
 
 class DaemonUnavailableError(RuntimeError):
@@ -243,7 +295,13 @@ class SessionBroker:
 
     async def stop(self, *, force: bool) -> dict[str, Any]:
         self.draining = True
-        remaining = await self._drain_jobs(STOP_DRAIN_TIMEOUT_SECONDS)
+        try:
+            remaining = await self._drain_jobs(STOP_DRAIN_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            # A client that stops waiting must not leave a daemon that refuses
+            # every request while never shutting down.
+            self.draining = False
+            raise
         if remaining and not force:
             self.draining = False
             raise RuntimeError(
@@ -504,13 +562,12 @@ async def _run_broker_async(*, data_dir: Path, headless: bool, timezone: str) ->
             request = await asyncio.to_thread(connection.recv)
             if not isinstance(request, dict):
                 raise ValueError("invalid broker request")
-            result = await broker.dispatch(
-                request,
-                lambda message: events.put_nowait(
-                    {"type": "status", "message": message}
-                ),
+            result = await _dispatch_until_client_leaves(
+                broker, request, events, connection
             )
             events.put_nowait({"type": "result", "result": result})
+        except ClientGoneError:
+            pass
         except Exception as error:
             events.put_nowait({"type": "error", "message": str(error)})
         finally:

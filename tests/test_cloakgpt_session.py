@@ -299,13 +299,6 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.broker.pages, {})
 
-    async def test_status_does_not_advertise_an_unenforced_ttl(self) -> None:
-        session_id = self.open_session()["session_id"]
-        daemon = await self.broker.dispatch({"operation": "ping"}, Mock())
-
-        self.assertNotIn("ttl_seconds", daemon)
-        self.assertNotIn("ttl_seconds", self.broker.session_status(session_id))
-
     async def test_restores_session_record_after_broker_restart(self) -> None:
         session_id = self.open_session()["session_id"]
         self.broker.sessions[session_id]["conversation_url"] = (
@@ -531,6 +524,31 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(self.broker.draining)
 
+    async def test_status_does_not_advertise_an_unenforced_ttl(self) -> None:
+        session_id = self.open_session()["session_id"]
+        daemon = await self.broker.dispatch({"operation": "ping"}, Mock())
+
+        self.assertNotIn("ttl_seconds", daemon)
+        self.assertNotIn("ttl_seconds", self.broker.session_status(session_id))
+
+    async def test_cancelled_stop_leaves_the_daemon_serving(self) -> None:
+        # A client that stops waiting must not leave a daemon that refuses every
+        # request while never shutting down.
+        request_id = self.broker._begin_job("busy-session")
+        stop = asyncio.create_task(
+            self.broker.dispatch({"operation": "stop"}, Mock())
+        )
+        await asyncio.sleep(0)
+        stop.cancel()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await stop
+
+        self.assertFalse(self.broker.draining)
+        self.assertTrue(self.broker.running)
+
+        await self.broker._finish_job(request_id, Mock())
+
     @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
     async def test_stop_refuses_while_a_request_is_still_running(self, send) -> None:
         session_id = self.open_session()["session_id"]
@@ -612,6 +630,93 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
         request.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await request
+
+
+class ClientDisconnectTests(unittest.IsolatedAsyncioTestCase):
+    """The daemon must not keep working for a client that has gone away."""
+
+    def setUp(self) -> None:
+        self.events: asyncio.Queue = asyncio.Queue()
+
+    def _connection(self, gone: asyncio.Event):
+        connection = Mock()
+
+        def poll(_timeout):
+            return gone.is_set()
+
+        connection.poll = poll
+        return connection
+
+    async def test_disconnect_cancels_the_running_request(self) -> None:
+        gone = asyncio.Event()
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def never_returns(_request, _status):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        broker = Mock()
+        broker.dispatch = never_returns
+        watch = asyncio.create_task(
+            cloakgpt_session._dispatch_until_client_leaves(
+                broker,
+                {"operation": "send"},
+                self.events,
+                self._connection(gone),
+            )
+        )
+        await started.wait()
+        gone.set()
+
+        with self.assertRaises(cloakgpt_session.ClientGoneError):
+            await watch
+
+        self.assertTrue(cancelled.is_set())
+
+    async def test_completed_request_returns_its_result(self) -> None:
+        gone = asyncio.Event()
+
+        async def succeed(_request, _status):
+            return {"answer": "OK."}
+
+        broker = Mock()
+        broker.dispatch = succeed
+
+        result = await cloakgpt_session._dispatch_until_client_leaves(
+            broker,
+            {"operation": "send"},
+            self.events,
+            self._connection(gone),
+        )
+
+        self.assertEqual(result, {"answer": "OK."})
+
+    async def test_status_messages_reach_the_event_queue(self) -> None:
+        gone = asyncio.Event()
+
+        async def report(_request, status):
+            status("Typing message...")
+            return {"answer": "OK."}
+
+        broker = Mock()
+        broker.dispatch = report
+
+        await cloakgpt_session._dispatch_until_client_leaves(
+            broker,
+            {"operation": "send"},
+            self.events,
+            self._connection(gone),
+        )
+
+        self.assertEqual(
+            self.events.get_nowait(),
+            {"type": "status", "message": "Typing message..."},
+        )
 
 
 if __name__ == "__main__":

@@ -460,7 +460,11 @@ cloakgpt ask "Reply only: OK."
 `ask` starts a new conversation. It runs headless by default, sends the message,
 and puts no limit on how long a response may take, because generation time
 depends on the model and prompt. Completion is detected from ChatGPT's active
-generation and assistant-turn state; press Ctrl+C to stop manually.
+generation and assistant-turn state; press Ctrl+C to stop manually. Stopping
+disconnects the client, and the daemon cancels the request it was waiting on and
+closes that browser page rather than finishing work nobody is reading. The
+message may already have reached ChatGPT, so check the conversation before
+resending it.
 
 What is bounded is inactivity. Growing response text or a changed activity label
 restarts a 15-minute stall window, so a long generation is never interrupted,
