@@ -520,8 +520,93 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
 
         release.set()
         await request
-        self.assertEqual(await stop, {"stopped": True})
+        self.assertEqual(
+            await stop,
+            {"stopped": True, "abandoned_requests": 0},
+        )
         self.assertTrue(self.broker.draining)
+
+    @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
+    async def test_stop_refuses_while_a_request_is_still_running(self, send) -> None:
+        session_id = self.open_session()["session_id"]
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def wait_for_release(*args, **kwargs):
+            entered.set()
+            await release.wait()
+            return "Done", "https://chatgpt.com/c/done"
+
+        send.side_effect = wait_for_release
+        request = asyncio.create_task(
+            self.broker.send({"session_id": session_id, "question": "Hello"}, Mock())
+        )
+        await entered.wait()
+
+        with patch.object(cloakgpt_session, "STOP_DRAIN_TIMEOUT_SECONDS", 0.05):
+            with self.assertRaises(RuntimeError) as caught:
+                await self.broker.dispatch({"operation": "stop"}, Mock())
+
+        self.assertIn("--force", str(caught.exception))
+        # A refused stop must leave the daemon able to serve the running request.
+        self.assertFalse(self.broker.draining)
+        self.assertTrue(self.broker.running)
+
+        release.set()
+        await request
+
+    @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
+    async def test_force_stop_abandons_a_stuck_request(self, send) -> None:
+        session_id = self.open_session()["session_id"]
+        entered = asyncio.Event()
+
+        async def never_returns(*args, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+        send.side_effect = never_returns
+        request = asyncio.create_task(
+            self.broker.send({"session_id": session_id, "question": "Hello"}, Mock())
+        )
+        await entered.wait()
+
+        with patch.object(cloakgpt_session, "STOP_DRAIN_TIMEOUT_SECONDS", 0.05):
+            with patch.object(cloakgpt_session, "FORCED_STOP_GRACE_SECONDS", 0.05):
+                result = await self.broker.dispatch(
+                    {"operation": "stop", "force": True}, Mock()
+                )
+
+        self.assertEqual(result, {"stopped": True, "abandoned_requests": 1})
+        self.assertFalse(self.broker.running)
+        self.context.close.assert_awaited()
+
+        request.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await request
+
+    @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
+    async def test_close_does_not_block_on_a_stuck_request(self, send) -> None:
+        session_id = self.open_session()["session_id"]
+        entered = asyncio.Event()
+
+        async def never_returns(*args, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+        send.side_effect = never_returns
+        request = asyncio.create_task(
+            self.broker.send({"session_id": session_id, "question": "Hello"}, Mock())
+        )
+        await entered.wait()
+
+        with patch.object(cloakgpt_session, "STOP_DRAIN_TIMEOUT_SECONDS", 0.05):
+            await asyncio.wait_for(self.broker.close(), timeout=2)
+
+        self.context.close.assert_awaited()
+
+        request.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await request
 
 
 if __name__ == "__main__":

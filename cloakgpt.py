@@ -18,7 +18,7 @@ from chatgpt_browser import (
     ReasoningLevel,
     launch_chatgpt_context,
 )
-from cloakgpt_session import request_broker, run_broker
+from cloakgpt_session import DaemonUnavailableError, request_broker, run_broker
 from cloakgpt_update import (
     consume_windows_update_result,
     update_cloakgpt,
@@ -285,7 +285,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     daemon_commands.add_parser("status")
-    daemon_commands.add_parser("stop")
+    stop_parser = daemon_commands.add_parser("stop")
+    stop_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="abandon requests that are still running instead of refusing to stop",
+    )
     return parser
 
 
@@ -362,11 +367,13 @@ def _run_session_command(args) -> int:
     return 0
 
 
-def _run_daemon_control(command: str) -> int:
-    result = request_broker(
-        {"operation": "ping" if command == "status" else "stop"},
-        auto_start=False,
+def _run_daemon_control(command: str, force: bool) -> int:
+    request = (
+        {"operation": "ping"}
+        if command == "status"
+        else {"operation": "stop", "force": force}
     )
+    result = request_broker(request, auto_start=False)
     print(json.dumps(result, indent=2))
     return 0
 
@@ -374,9 +381,9 @@ def _run_daemon_control(command: str) -> int:
 def _stop_daemon_for_update() -> None:
     try:
         request_broker({"operation": "stop"}, auto_start=False)
-    except RuntimeError as error:
-        if str(error) != "CloakGPT daemon is not running":
-            raise
+    except DaemonUnavailableError:
+        # A daemon that cannot be reached is already not holding the profile.
+        return
 
 
 def _run_update_command(args) -> int:
@@ -439,7 +446,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "session":
             return _run_session_command(args)
         if args.command == "daemon":
-            return _run_daemon_control(args.daemon_command)
+            return _run_daemon_control(
+                args.daemon_command,
+                getattr(args, "force", False),
+            )
         if args.command == "update":
             return _run_update_command(args)
 

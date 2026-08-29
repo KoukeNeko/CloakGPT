@@ -31,6 +31,9 @@ from chatgpt_browser import (
 
 
 DEFAULT_SESSION_TTL_SECONDS = 2 * 60 * 60
+STOP_DRAIN_TIMEOUT_SECONDS = 30
+FORCED_STOP_GRACE_SECONDS = 5
+SHUTDOWN_TASK_TIMEOUT_SECONDS = 10
 METADATA_NAME = "cloakgpt-daemon.json"
 STATE_NAME = "cloakgpt-sessions.json"
 LOCK_NAME = "cloakgpt-daemon.lock"
@@ -64,6 +67,10 @@ def _session_ttl() -> int:
     if ttl <= 0:
         raise ValueError("CLOAKGPT_SESSION_TTL_SECONDS must be greater than zero")
     return ttl
+
+
+class DaemonUnavailableError(RuntimeError):
+    """The daemon cannot be reached, so there is nothing to talk to."""
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -243,6 +250,32 @@ class SessionBroker:
             if not self._inflight_jobs:
                 self._jobs_done.set()
 
+    async def _drain_jobs(self, timeout: float) -> int:
+        """Wait for running requests and report how many are still running."""
+        try:
+            await asyncio.wait_for(self._jobs_done.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return len(self._inflight_jobs)
+        return 0
+
+    async def stop(self, *, force: bool) -> dict[str, Any]:
+        self.draining = True
+        remaining = await self._drain_jobs(STOP_DRAIN_TIMEOUT_SECONDS)
+        if remaining and not force:
+            self.draining = False
+            raise RuntimeError(
+                f"{remaining} request(s) are still running; "
+                "retry once they finish or stop with --force"
+            )
+        if remaining:
+            # Closing the context fails every pending page call, so each stuck
+            # request unwinds through its own cleanup and releases its page.
+            await self._close_context_if_idle(force=True)
+            await self._drain_jobs(FORCED_STOP_GRACE_SECONDS)
+        self.running = False
+        await self._close_context_if_idle(force=True)
+        return {"stopped": True, "abandoned_requests": remaining}
+
     def open_session(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:
         requested_headless = bool(request["headless"])
         requested_timezone = str(request["timezone"])
@@ -406,11 +439,7 @@ class SessionBroker:
                 "open_pages": len(self.pages),
             }
         if operation == "stop":
-            self.draining = True
-            self.running = False
-            await self._jobs_done.wait()
-            await self._close_context_if_idle(force=True)
-            return {"stopped": True}
+            return await self.stop(force=bool(request.get("force", False)))
         if self.draining:
             raise RuntimeError("CloakGPT daemon is stopping")
         if operation == "open":
@@ -427,7 +456,7 @@ class SessionBroker:
 
     async def close(self) -> None:
         self.draining = True
-        await self._jobs_done.wait()
+        await self._drain_jobs(STOP_DRAIN_TIMEOUT_SECONDS)
         await self._close_context_if_idle(force=True)
 
 
@@ -436,6 +465,15 @@ def _send_event(connection, event: dict[str, Any]) -> None:
         connection.send(event)
     except (BrokenPipeError, EOFError, OSError):
         pass
+
+
+async def _finish_connection_tasks(tasks: set[asyncio.Task[Any]]) -> None:
+    """Let handlers finish, then cancel whatever refuses to unwind in time."""
+    _done, pending = await asyncio.wait(tasks, timeout=SHUTDOWN_TASK_TIMEOUT_SECONDS)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def _run_broker_async(*, data_dir: Path, headless: bool, timezone: str) -> int:
@@ -525,7 +563,7 @@ async def _run_broker_async(*, data_dir: Path, headless: bool, timezone: str) ->
             task = asyncio.create_task(handle_connection(connection))
             tasks.add(task)
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await _finish_connection_tasks(tasks)
         await broker.close()
         _remove_file(_metadata_path(data_dir))
         if family == "AF_UNIX":
@@ -667,7 +705,7 @@ def request_broker(
         else _load_metadata(data_dir)
     )
     if metadata is None:
-        raise RuntimeError("CloakGPT daemon is not running")
+        raise DaemonUnavailableError("CloakGPT daemon is not running")
     try:
         auth_key = base64.b64decode(metadata["auth_key"], validate=True)
         connection = Client(
@@ -676,7 +714,10 @@ def request_broker(
             authkey=auth_key,
         )
     except Exception as error:
-        raise RuntimeError("could not connect to the CloakGPT daemon") from error
+        raise DaemonUnavailableError(
+            f"could not connect to the CloakGPT daemon (pid {metadata.get('pid')}); "
+            "it is running but unreachable, so end that process and retry"
+        ) from error
 
     try:
         connection.send(request)

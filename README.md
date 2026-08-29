@@ -411,8 +411,10 @@ browsers close after every completed response, and an idle daemon does not hold
 the profile. If `ask` or `login` still reports that it is in use (older builds
 may instead print a Chromium log ending in `exitCode=21`), run
 `cloakgpt daemon status`. Wait for an active request or stop the daemon and
-retry. If no daemon is running, close the existing CloakGPT Chromium window.
-Do not delete profile lock files or terminate unrelated Chrome processes.
+retry. If `daemon stop` reports that requests are still running and they can no
+longer finish, use `cloakgpt daemon stop --force`. If no daemon is running,
+close the existing CloakGPT Chromium window. Do not delete profile lock files or
+terminate unrelated Chrome processes.
 
 If a packaged macOS build reports `Failed to reserve virtual memory for
 CodeRange`, its bundled Playwright Node driver was signed without the V8 JIT
@@ -456,10 +458,14 @@ cloakgpt ask "Reply only: OK."
 ```
 
 `ask` starts a new conversation. It runs headless by default, sends the message,
-and waits without a response deadline because generation time depends on the
-model and prompt. Completion is detected from ChatGPT's active generation and
-assistant-turn state; press Ctrl+C to stop manually. Use `--headed` when you
-want to observe or debug the browser window:
+and waits up to one hour for a completed response, because generation time
+depends on the model and prompt. Completion is detected from ChatGPT's active
+generation and assistant-turn state; press Ctrl+C to stop manually. A request
+that passes the deadline reports an unknown delivery state and releases its
+browser page, so one stalled page cannot pin the daemon's browser open. Set
+`CLOAKGPT_RESPONSE_TIMEOUT_SECONDS` to another number of seconds, or to `0` to
+wait indefinitely. Use `--headed` when you want to observe or debug the browser
+window:
 
 ```sh
 cloakgpt ask "Reply only: OK." --headed
@@ -553,11 +559,19 @@ cloakgpt session status SESSION_ID
 cloakgpt session close SESSION_ID
 cloakgpt daemon status
 cloakgpt daemon stop
+cloakgpt daemon stop --force
 ```
 
 `daemon status` reports whether the browser is running plus the active, queued,
 and open-page counts. `session status` reports that session's running and queued
 request counts.
+
+`daemon stop` waits a short while for running requests to finish. If any are
+still running it refuses to stop and leaves the daemon serving them, so a long
+response is never cut off by accident. `daemon stop --force` closes the browser
+and abandons whatever is left, and reports the count as `abandoned_requests`.
+Use it when a request can no longer finish, for example after the client that
+started it exited.
 
 An idle daemon does not own the browser profile, so `cloakgpt login` can open it
 without discarding session IDs. Do not start login while a session request is
