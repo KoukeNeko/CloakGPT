@@ -571,6 +571,28 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(send.await_count, 1)
         self.assertFalse(send.await_args.kwargs.get("allow_signed_out", False))
 
+    async def test_cancelled_force_stop_leaves_the_daemon_serving(self) -> None:
+        # Cancellation can land in the forced grace window, not only in the
+        # first drain, and must not strand the daemon in draining.
+        request_id = self.broker._begin_job("stuck-session")
+        with patch.object(cloakgpt_session, "STOP_DRAIN_TIMEOUT_SECONDS", 0.01):
+            with patch.object(cloakgpt_session, "FORCED_STOP_GRACE_SECONDS", 5):
+                stop = asyncio.create_task(
+                    self.broker.dispatch(
+                        {"operation": "stop", "force": True}, Mock()
+                    )
+                )
+                await asyncio.sleep(0.1)
+                stop.cancel()
+
+                with self.assertRaises(asyncio.CancelledError):
+                    await stop
+
+        self.assertFalse(self.broker.draining)
+        self.assertTrue(self.broker.running)
+
+        await self.broker._finish_job(request_id, Mock())
+
     async def test_cancelled_stop_leaves_the_daemon_serving(self) -> None:
         # A client that stops waiting must not leave a daemon that refuses every
         # request while never shutting down.

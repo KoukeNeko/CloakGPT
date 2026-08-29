@@ -302,24 +302,27 @@ class SessionBroker:
         self.draining = True
         try:
             remaining = await self._drain_jobs(STOP_DRAIN_TIMEOUT_SECONDS)
-        except asyncio.CancelledError:
-            # A client that stops waiting must not leave a daemon that refuses
-            # every request while never shutting down.
-            self.draining = False
-            raise
-        if remaining and not force:
-            self.draining = False
-            raise RuntimeError(
-                f"{remaining} request(s) are still running; "
-                "retry once they finish or stop with --force"
-            )
-        if remaining:
-            # Closing the context fails every pending page call, so each stuck
-            # request unwinds through its own cleanup and releases its page.
+            if remaining and not force:
+                self.draining = False
+                raise RuntimeError(
+                    f"{remaining} request(s) are still running; "
+                    "retry once they finish or stop with --force"
+                )
+            if remaining:
+                # Closing the context fails every pending page call, so each
+                # stuck request unwinds through its own cleanup and releases
+                # its page.
+                await self._close_context_if_idle(force=True)
+                await self._drain_jobs(FORCED_STOP_GRACE_SECONDS)
+            self.running = False
             await self._close_context_if_idle(force=True)
-            await self._drain_jobs(FORCED_STOP_GRACE_SECONDS)
-        self.running = False
-        await self._close_context_if_idle(force=True)
+        except asyncio.CancelledError:
+            # Cancellation can arrive at any await here, not only the first
+            # drain. A client that stops waiting must never leave a daemon that
+            # refuses every request while never shutting down.
+            self.draining = False
+            self.running = True
+            raise
         return {"stopped": True, "abandoned_requests": remaining}
 
     def open_session(self, request: dict[str, Any], status: StatusCallback) -> dict[str, Any]:
