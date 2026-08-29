@@ -1,6 +1,6 @@
 ---
 name: use-cloakgpt
-description: Use, update, or completely uninstall CloakGPT when the user asks an agent to operate their signed-in ChatGPT browser session, manage persistent conversations or page settings, preserve returned Markdown and sources, update the packaged CLI, or remove CloakGPT data; not for ordinary questions the agent can answer directly.
+description: Use, update, or completely uninstall CloakGPT when the user asks an agent to operate their own ChatGPT browser session, signed in or signed out, manage persistent conversations or page settings, preserve returned Markdown and sources, update the packaged CLI, or remove CloakGPT data; not for ordinary questions the agent can answer directly.
 ---
 
 # Use CloakGPT
@@ -18,9 +18,10 @@ external ChatGPT conversation, so submit only messages the user requested.
 - CloakBrowser is a separately downloaded external binary with its own license
   and trust boundary. Do not describe it as bundled into CloakGPT or covered by
   CloakGPT's MIT License.
-- CloakGPT intentionally controls a signed-in browser and can send messages to
-  ChatGPT. Treat an agent allowed to execute it as authorized only for the
-  operations the user requested. Never use it to bypass account controls.
+- CloakGPT intentionally controls the user's own browser profile and can send
+  messages to ChatGPT, whether or not that profile is signed in. Treat an agent
+  allowed to execute it as authorized only for the operations the user
+  requested. Never use it to bypass account controls.
 - A persistent session ID is a local conversation selector, not a ChatGPT
   credential or the daemon authentication key. The separate daemon key remains
   in the local CloakGPT data directory and is never printed by normal commands.
@@ -42,6 +43,10 @@ external ChatGPT conversation, so submit only messages the user requested.
   profile. A one-shot request uses a temporary page and leaves existing
   persistent sessions intact. Do not stop the daemon merely to start a new
   one-shot conversation.
+- A one-shot `ask` also works on a signed-out profile; persistent sessions do
+  not. A signed-out conversation is not addressable the way `--session`
+  requires, so a session request on a signed-out profile fails before sending
+  anything. Do not ask the user to sign in for a one-shot question.
 - Prefer the installed `cloakgpt` command. In a source checkout where it is not
   installed, use that checkout's virtual-environment Python with `cloakgpt.py`.
 - Pass the question as one argument. Use the shell's safe argument quoting; do
@@ -51,6 +56,11 @@ external ChatGPT conversation, so submit only messages the user requested.
 
 Omit `--model` and `--reasoning` unless the user explicitly requests them.
 Omission preserves ChatGPT's current page settings.
+
+A signed-out page has no model or reasoning controls, so ChatGPT chooses for
+itself and both options are rejected rather than ignored; the reported page
+status reads `signed-out default`. If the user needs a specific model or
+reasoning level, ask them to run `cloakgpt login` first.
 
 Supported model values are:
 
@@ -96,7 +106,12 @@ cloakgpt ask "What is the weather today?" --timezone Asia/Taipei
 - Do not impose an arbitrary response timeout. ChatGPT generation and web search
   can take an unknown amount of time. Keep waiting while the process reports
   progress; stop with Ctrl+C only at the user's request or when cancellation is
-  otherwise required.
+  otherwise required. CloakGPT bounds inactivity, not total time: a page that
+  shows no progress at all releases itself and reports that the prompt was sent
+  but completion could not be confirmed, while a long answer that keeps making
+  progress is never cut off. Interrupting disconnects the client, and the daemon
+  then cancels that request and closes its page, so the message may already have
+  reached ChatGPT; check the conversation before resending it.
 - In ordinary text mode, read progress from stderr and the completed answer
   from stdout. Do not return `[status]` lines as part of the answer.
 - For agent-driven calls, prefer `cloakgpt ask ... --output jsonl`. Every status
@@ -125,19 +140,28 @@ Use the least invasive recovery step:
 3. If installation still fails, inspect with `cloakgpt browser info --quick` or
    `cloakgpt browser doctor`, then report the diagnostic and any named
    environment variable. Do not guess credentials or license values.
-4. If ChatGPT requires authentication, ask the user to complete
-   `cloakgpt login` in its visible browser window. An idle daemon does not hold
-   the browser profile; if a session request is active, wait for it to finish or
-   obtain permission before stopping the daemon. Stopping preserves session IDs
-   and conversation URLs. Never enter, request, or expose their ChatGPT
-   password, cookies, browser storage, or daemon authentication material.
+4. If a persistent session reports that the profile is signed out, ask the user
+   to complete `cloakgpt login` in its visible browser window. Do not ask for a
+   login when a one-shot `ask` would serve the request, because that works
+   signed out. An idle daemon does not hold the browser profile; if a session
+   request is active, wait for it to finish or obtain permission before stopping
+   the daemon. Stopping preserves session IDs and conversation URLs. Never
+   enter, request, or expose their ChatGPT password, cookies, browser storage,
+   or daemon authentication material.
 5. If CloakGPT says the browser profile is already in use, or an older build
    dumps a Chromium error ending in `exitCode=21`, run `cloakgpt daemon status`.
    Wait for an active request when it owns the profile; otherwise obtain
-   permission before stopping it. If no daemon is running, ask the user to
-   close the CloakGPT Chromium window. Do not delete profile lock files or
-   terminate unrelated Chrome processes.
-6. For a headless page-state failure, retry once with `--headed` only when a
+   permission before stopping it. `cloakgpt daemon stop` refuses while requests
+   are still running and says so; treat that as the request still being alive
+   and wait. `cloakgpt daemon stop --force` abandons those requests and closes
+   the browser, so use it only for work that can no longer finish and only with
+   the user's explicit approval for that specific loss. If no daemon is running,
+   ask the user to close the CloakGPT Chromium window. Do not delete profile
+   lock files or terminate unrelated Chrome processes.
+6. If a command reports that the daemon is running but unreachable, and names
+   its process ID, report that to the user and let them end that process. Do not
+   terminate it yourself.
+7. For a headless page-state failure, retry once with `--headed` only when a
    visible diagnostic run is acceptable. Persistent sessions require stopping
    the daemon before changing browser mode; do not stop it without permission.
 
