@@ -68,7 +68,6 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
             data_dir=self.data_dir,
             headless=True,
             timezone="Asia/Taipei",
-            ttl_seconds=7200,
         )
 
     async def asyncTearDown(self) -> None:
@@ -284,21 +283,28 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
         self.page.close.assert_not_awaited()
         self.context.close.assert_not_awaited()
 
-    async def test_watchdog_preserves_cold_session(self) -> None:
+    async def test_long_idle_session_never_expires(self) -> None:
         session_id = self.open_session()["session_id"]
         self.broker.sessions[session_id]["conversation_url"] = (
             "https://chatgpt.com/c/restorable"
         )
         self.broker.sessions[session_id]["last_used"] = time.time() - 7201
 
-        self.broker._reap_stale()
+        status = self.broker.session_status(session_id)
 
         self.assertIn(session_id, self.broker.sessions)
         self.assertEqual(
-            self.broker.sessions[session_id]["conversation_url"],
+            status["conversation_url"],
             "https://chatgpt.com/c/restorable",
         )
         self.assertEqual(self.broker.pages, {})
+
+    async def test_status_does_not_advertise_an_unenforced_ttl(self) -> None:
+        session_id = self.open_session()["session_id"]
+        daemon = await self.broker.dispatch({"operation": "ping"}, Mock())
+
+        self.assertNotIn("ttl_seconds", daemon)
+        self.assertNotIn("ttl_seconds", self.broker.session_status(session_id))
 
     async def test_restores_session_record_after_broker_restart(self) -> None:
         session_id = self.open_session()["session_id"]
@@ -311,7 +317,6 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
             data_dir=self.data_dir,
             headless=True,
             timezone="Asia/Taipei",
-            ttl_seconds=7200,
         )
         try:
             self.assertEqual(

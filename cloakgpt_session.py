@@ -30,7 +30,6 @@ from chatgpt_browser import (
 )
 
 
-DEFAULT_SESSION_TTL_SECONDS = 2 * 60 * 60
 STOP_DRAIN_TIMEOUT_SECONDS = 30
 FORCED_STOP_GRACE_SECONDS = 5
 SHUTDOWN_TASK_TIMEOUT_SECONDS = 10
@@ -54,19 +53,6 @@ def _endpoint(data_dir: Path) -> tuple[str, str]:
     if os.name == "nt":
         return "AF_PIPE", rf"\\.\pipe\cloakgpt-{digest}"
     return "AF_UNIX", str(Path(tempfile.gettempdir()) / f"cloakgpt-{digest}.sock")
-
-
-def _session_ttl() -> int:
-    value = os.environ.get("CLOAKGPT_SESSION_TTL_SECONDS")
-    if value is None:
-        return DEFAULT_SESSION_TTL_SECONDS
-    try:
-        ttl = int(value)
-    except ValueError as error:
-        raise ValueError("CLOAKGPT_SESSION_TTL_SECONDS must be an integer") from error
-    if ttl <= 0:
-        raise ValueError("CLOAKGPT_SESSION_TTL_SECONDS must be greater than zero")
-    return ttl
 
 
 class DaemonUnavailableError(RuntimeError):
@@ -129,13 +115,11 @@ class SessionBroker:
         data_dir: Path,
         headless: bool,
         timezone: str,
-        ttl_seconds: int,
     ) -> None:
         self.data_dir = data_dir
         self.profile_dir = data_dir / DEFAULT_PROFILE_DIR.name
         self.headless = headless
         self.timezone = timezone
-        self.ttl_seconds = ttl_seconds
         self.context = None
         self.pages: dict[str, Any] = {}
         self.sessions: dict[str, dict[str, Any]] = {}
@@ -168,7 +152,6 @@ class SessionBroker:
                 "version": 2,
                 "headless": self.headless,
                 "timezone": self.timezone,
-                "ttl_seconds": self.ttl_seconds,
                 "sessions": self.sessions,
             },
         )
@@ -289,7 +272,6 @@ class SessionBroker:
                 f"daemon timezone is {self.timezone}; stop it before changing timezone"
             )
 
-        self._reap_stale()
         session_id = uuid.uuid4().hex
         status("Creating persistent conversation ID...")
         now = time.time()
@@ -304,7 +286,6 @@ class SessionBroker:
     async def send(
         self, request: dict[str, Any], status: StatusCallback
     ) -> dict[str, Any]:
-        self._reap_stale()
         session_id = str(request["session_id"])
         if session_id not in self.sessions:
             raise ValueError(f"unknown session: {session_id}")
@@ -362,7 +343,6 @@ class SessionBroker:
         self, request: dict[str, Any], status: StatusCallback
     ) -> dict[str, Any]:
         """Send a new conversation through the daemon without saving a session."""
-        self._reap_stale()
         request_id = self._begin_job(None)
         status("Opening a temporary new conversation...")
         model = ChatGPTModel(request["model"]) if request.get("model") else None
@@ -399,7 +379,6 @@ class SessionBroker:
             "session_id": session_id,
             "headless": self.headless,
             "timezone": self.timezone,
-            "ttl_seconds": self.ttl_seconds,
             "conversation_url": record.get("conversation_url"),
             "created_at": record.get("created_at"),
             "last_used": record.get("last_used"),
@@ -418,10 +397,6 @@ class SessionBroker:
         self._save_state()
         return {"session_id": session_id, "closed": True}
 
-    def _reap_stale(self) -> None:
-        # Conversation records stay cold on disk; active requests own their pages.
-        return
-
     async def dispatch(
         self, request: dict[str, Any], status: StatusCallback
     ) -> dict[str, Any]:
@@ -431,7 +406,6 @@ class SessionBroker:
                 "pid": os.getpid(),
                 "headless": self.headless,
                 "timezone": self.timezone,
-                "ttl_seconds": self.ttl_seconds,
                 "sessions": len(self.sessions),
                 "browser": "running" if self.context is not None else "stopped",
                 "active_requests": len(self.pages),
@@ -486,7 +460,6 @@ async def _run_broker_async(*, data_dir: Path, headless: bool, timezone: str) ->
         data_dir=data_dir,
         headless=headless,
         timezone=timezone,
-        ttl_seconds=_session_ttl(),
     )
     listener = Listener(address, family=family, authkey=auth_key)
     _write_json(
@@ -548,7 +521,6 @@ async def _run_broker_async(*, data_dir: Path, headless: bool, timezone: str) ->
     tasks: set[asyncio.Task[Any]] = set()
     try:
         while broker.running:
-            broker._reap_stale()
             try:
                 connection = await asyncio.wait_for(connections.get(), timeout=1)
             except TimeoutError:

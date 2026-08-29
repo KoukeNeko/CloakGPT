@@ -248,7 +248,6 @@ class CloakGPTCliTests(unittest.TestCase):
             "session_id": "session-123",
             "headless": True,
             "timezone": "Asia/Taipei",
-            "ttl_seconds": 7200,
         }
         output = io.StringIO()
         errors = io.StringIO()
