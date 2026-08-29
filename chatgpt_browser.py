@@ -5,6 +5,7 @@ import os
 import platform
 import random
 import re
+import time
 from contextlib import asynccontextmanager
 import sys
 from collections.abc import Callable
@@ -44,6 +45,10 @@ HUMAN_TYPING_MIN_DELAY_MS = 6
 HUMAN_TYPING_MAX_DELAY_MS = 90
 HUMAN_TYPING_JITTER = 0.35
 LINE_BREAK_SHORTCUT = "Shift+Enter"
+DEFAULT_RESPONSE_STALL_SECONDS = 900
+RESPONSE_STALL_ENV_VAR = "CLOAKGPT_RESPONSE_STALL_SECONDS"
+UNLIMITED_RESPONSE_STALL = 0
+MILLISECONDS_PER_SECOND = 1_000
 KEEPALIVE_SCROLL_MIN_INTERVAL_SECONDS = 8.0
 KEEPALIVE_SCROLL_MAX_INTERVAL_SECONDS = 18.0
 KEEPALIVE_SCROLL_MIN_DISTANCE = 120
@@ -331,6 +336,7 @@ RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId}) => {
         || ariaLabel.endsWith('中');
     });
   return {
+    progress: (response?.innerText || '').length,
     complete: messages.length > previousCount
       && !!response?.innerText.trim()
       && !messageId.startsWith('request-placeholder-')
@@ -343,6 +349,22 @@ RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId}) => {
       : null
   };
 }"""
+
+
+def response_stall_seconds() -> float | None:
+    """Return how long ChatGPT may show no progress, or None to wait forever."""
+    value = os.environ.get(RESPONSE_STALL_ENV_VAR)
+    if value is None:
+        return DEFAULT_RESPONSE_STALL_SECONDS
+    try:
+        stall = int(value)
+    except ValueError as error:
+        raise ValueError(f"{RESPONSE_STALL_ENV_VAR} must be an integer") from error
+    if stall < UNLIMITED_RESPONSE_STALL:
+        raise ValueError(f"{RESPONSE_STALL_ENV_VAR} must not be negative")
+    if stall == UNLIMITED_RESPONSE_STALL:
+        return None
+    return stall
 
 
 def _validate_question(question: str) -> None:
@@ -526,10 +548,39 @@ async def _extract_response(page) -> str:
     return _format_response(markdown, await _extract_sources(page, response))
 
 
+class ResponseStalledError(Exception):
+    """ChatGPT showed no progress for the whole stall window."""
+
+
+def _raise_if_stalled(progressed_at: float, stall_seconds: float | None) -> None:
+    if stall_seconds is None:
+        return
+    if time.monotonic() - progressed_at < stall_seconds:
+        return
+    raise ResponseStalledError(_stall_message(stall_seconds))
+
+
+def _first_response_timeout_ms(stall_seconds: float | None) -> float:
+    # Playwright reads 0 as "no timeout", which is what unlimited waiting means.
+    if stall_seconds is None:
+        return 0
+    return stall_seconds * MILLISECONDS_PER_SECOND
+
+
+def _stall_message(stall_seconds: float | None) -> str:
+    window = "the stall window" if stall_seconds is None else f"{stall_seconds:g}s"
+    return (
+        f"ChatGPT showed no progress for {window}; the prompt was sent but "
+        f"completion could not be confirmed "
+        f"(raise or disable this with {RESPONSE_STALL_ENV_VAR})"
+    )
+
+
 async def _wait_for_reply(
     page,
     previous_count: int,
     status_callback: StatusCallback | None,
+    stall_seconds: float | None,
 ) -> str:
     keepalive_task = asyncio.create_task(_keep_page_active(page))
     try:
@@ -538,12 +589,14 @@ async def _wait_for_reply(
             document.querySelectorAll('[data-message-author-role="assistant"]').length
             > previousCount""",
             arg=previous_count,
-            timeout=0,
+            timeout=_first_response_timeout_ms(stall_seconds),
         )
         _emit_status(status_callback, "ChatGPT is responding...")
         response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
         turn_id = await response.evaluate(TURN_ID_SCRIPT)
         previous_status = None
+        previous_progress = None
+        progressed_at = time.monotonic()
         while True:
             state = await page.evaluate(
                 RESPONSE_STATE_SCRIPT,
@@ -552,9 +605,16 @@ async def _wait_for_reply(
             current_status = state["status"]
             if current_status and current_status != previous_status:
                 _emit_status(status_callback, f"ChatGPT activity: {current_status}")
-                previous_status = current_status
+            # Growing text or a changed activity label both mean ChatGPT is still
+            # working, so only a completely inert page runs the stall window down.
+            current_progress = (current_status, state.get("progress"))
+            if current_progress != previous_progress:
+                previous_progress = current_progress
+                progressed_at = time.monotonic()
+            previous_status = current_status
             if state["complete"]:
                 break
+            _raise_if_stalled(progressed_at, stall_seconds)
             await page.wait_for_timeout(250)
     finally:
         keepalive_task.cancel()
@@ -830,15 +890,19 @@ async def send_message_on_page(
         _emit_status(status_callback, "Sending message...")
         await send_button.click()
 
+    stall_seconds = response_stall_seconds()
     try:
         _emit_status(status_callback, "Waiting for ChatGPT response (Ctrl+C to stop)...")
         answer = await _wait_for_reply(
             page,
             previous_count,
             status_callback,
+            stall_seconds,
         )
         _emit_status(status_callback, "Response complete.")
         return answer, page.url
+    except ResponseStalledError as error:
+        raise DeliveryStateUnknownError(str(error)) from error
     except Exception as error:
         raise DeliveryStateUnknownError(
             "delivery state unknown; the prompt was sent but completion could not be confirmed"

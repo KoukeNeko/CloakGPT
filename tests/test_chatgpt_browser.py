@@ -203,6 +203,88 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "a\nb\nc\nd",
         )
 
+    def test_response_stall_defaults_to_a_bounded_window(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(
+                chatgpt_browser.response_stall_seconds(),
+                chatgpt_browser.DEFAULT_RESPONSE_STALL_SECONDS,
+            )
+
+    def test_response_stall_env_override_allows_unlimited_waiting(self) -> None:
+        variable = chatgpt_browser.RESPONSE_STALL_ENV_VAR
+        with patch.dict("os.environ", {variable: "120"}, clear=True):
+            self.assertEqual(chatgpt_browser.response_stall_seconds(), 120)
+        with patch.dict("os.environ", {variable: "0"}, clear=True):
+            self.assertIsNone(chatgpt_browser.response_stall_seconds())
+
+    def test_response_stall_rejects_invalid_env(self) -> None:
+        variable = chatgpt_browser.RESPONSE_STALL_ENV_VAR
+        for value in ("soon", "-1"):
+            with patch.dict("os.environ", {variable: value}, clear=True):
+                with self.assertRaises(ValueError):
+                    chatgpt_browser.response_stall_seconds()
+
+    def _run_send_with_states(self, states, seconds_per_poll, stall_seconds):
+        """Drive the reply loop with a clock that only advances between polls."""
+        elapsed = [0.0]
+        remaining = list(states)
+
+        async def evaluate(script, *args, **kwargs):
+            if remaining:
+                elapsed[0] += seconds_per_poll
+                return remaining.pop(0)
+            raise AssertionError("the reply loop polled more times than expected")
+
+        self.page.evaluate = AsyncMock(side_effect=evaluate)
+        with patch("chatgpt_browser.time.monotonic", side_effect=lambda: elapsed[0]):
+            with patch(
+                "chatgpt_browser.response_stall_seconds",
+                return_value=stall_seconds,
+            ):
+                return asyncio.run(
+                    chatgpt_browser.send_message_on_page(
+                        self.page,
+                        chatgpt_browser.CHATGPT_URL,
+                        "Hello",
+                        None,
+                        None,
+                        None,
+                    )
+                )
+
+    def test_ongoing_progress_never_runs_the_stall_window_down(self) -> None:
+        # Ten minutes pass between polls, far beyond the window, but ChatGPT
+        # keeps producing text -- which is what a long run actually looks like.
+        working = [
+            {"complete": False, "status": "思考中", "progress": length}
+            for length in (10, 400, 9_000, 120_000)
+        ]
+        finished = [{"complete": True, "status": None, "progress": 130_000}]
+
+        answer, _url = self._run_send_with_states(
+            working + finished,
+            seconds_per_poll=600,
+            stall_seconds=60,
+        )
+
+        self.assertEqual(answer, "OK.")
+
+    def test_inert_response_reports_unknown_delivery(self) -> None:
+        inert = [{"complete": False, "status": "思考中", "progress": 42}] * 3
+
+        with self.assertRaises(chatgpt_browser.DeliveryStateUnknownError) as caught:
+            self._run_send_with_states(
+                inert,
+                seconds_per_poll=600,
+                stall_seconds=60,
+            )
+
+        self.assertIn("no progress", str(caught.exception))
+
+    def test_unlimited_stall_waits_without_a_playwright_timeout(self) -> None:
+        self.assertEqual(chatgpt_browser._first_response_timeout_ms(None), 0)
+        self.assertEqual(chatgpt_browser._first_response_timeout_ms(90), 90_000)
+
     def test_scales_human_typing_delay_for_long_questions(self) -> None:
         short_range = chatgpt_browser._human_typing_delay_range("Hello")
         long_range = chatgpt_browser._human_typing_delay_range("x" * 2_000)
@@ -597,7 +679,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.editor.press_sequentially.assert_not_awaited()
         self.send_button.click.assert_not_awaited()
 
-    def test_reports_page_and_response_status_without_response_timeout(self) -> None:
+    def test_reports_page_and_response_status_within_the_stall_window(self) -> None:
         status_callback = Mock()
 
         chatgpt_browser.start_conversation(
@@ -619,7 +701,11 @@ class ChatGPTBrowserTests(unittest.TestCase):
         status_callback.assert_any_call("Collecting response and sources...")
         status_callback.assert_any_call("Response complete.")
         for call in self.page.wait_for_function.call_args_list:
-            self.assertEqual(call.kwargs["timeout"], 0)
+            self.assertEqual(
+                call.kwargs["timeout"],
+                chatgpt_browser.DEFAULT_RESPONSE_STALL_SECONDS
+                * chatgpt_browser.MILLISECONDS_PER_SECOND,
+            )
         completion_predicate = chatgpt_browser.RESPONSE_STATE_SCRIPT
         self.assertIn('data-testid="stop-button"', completion_predicate)
         self.assertIn("request-placeholder-", completion_predicate)
