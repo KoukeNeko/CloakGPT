@@ -13,6 +13,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.profile_dir = Path(self.temp_dir.name) / "profile"
 
         self.editor = Mock()
+        self.editor.count = AsyncMock(return_value=1)
         self.editor.wait_for = AsyncMock()
         self.editor.fill = AsyncMock()
         self.editor.focus = AsyncMock()
@@ -85,6 +86,8 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.model_match.first = self.model_option
         self.reasoning_options.filter.return_value = self.model_match
         self.reasoning_menu.locator.return_value = self.reasoning_options
+        self.signed_out_marker = Mock()
+        self.signed_out_marker.count = AsyncMock(return_value=0)
         self.responses = Mock()
         self.responses.count = AsyncMock(return_value=0)
         self.responses.last.evaluate = AsyncMock(side_effect=lambda script: (
@@ -95,6 +98,19 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.citation_pills = Mock()
         self.citation_pills.count = AsyncMock(return_value=0)
         self.responses.last.locator.return_value = self.citation_pills
+        self.lightweight_editor = Mock()
+        self.lightweight_editor.count = AsyncMock(return_value=0)
+        self.lightweight_editor.wait_for = AsyncMock()
+        self.lightweight_editor.fill = AsyncMock()
+        self.lightweight_editor.focus = AsyncMock()
+        self.lightweight_editor.press = AsyncMock()
+        self.lightweight_editor.press_sequentially = AsyncMock()
+        self.lightweight_send = Mock()
+        self.lightweight_send.wait_for = AsyncMock()
+        self.lightweight_send.click = AsyncMock()
+        self.lightweight_responses = Mock()
+        self.lightweight_responses.count = AsyncMock(return_value=0)
+        self.lightweight_responses.last = self.responses.last
 
         self.page = Mock()
         self.page.url = "https://chatgpt.com/c/test-conversation"
@@ -103,6 +119,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             return_value={"complete": True, "status": None}
         )
         self.page.wait_for_function = AsyncMock()
+        self.page.wait_for_selector = AsyncMock()
         self.page.wait_for_timeout = AsyncMock()
         self.page.keyboard.press = AsyncMock()
         locator_results = {
@@ -110,6 +127,12 @@ class ChatGPTBrowserTests(unittest.TestCase):
             chatgpt_browser.SEND_BUTTON_SELECTOR: self.send_button,
             chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: self.responses,
             chatgpt_browser.REASONING_TRIGGER_SELECTOR: self.reasoning_trigger,
+            chatgpt_browser.SIGNED_OUT_MARKER_SELECTOR: self.signed_out_marker,
+            chatgpt_browser.LIGHTWEIGHT_SURFACE.editor_selector: self.lightweight_editor,
+            chatgpt_browser.LIGHTWEIGHT_SURFACE.send_selector: self.lightweight_send,
+            chatgpt_browser.LIGHTWEIGHT_SURFACE.assistant_selector: (
+                self.lightweight_responses
+            ),
         }
         visible_menus = Mock()
         visible_menus.first = self.root_menu
@@ -304,6 +327,127 @@ class ChatGPTBrowserTests(unittest.TestCase):
     def test_unlimited_stall_waits_without_a_playwright_timeout(self) -> None:
         self.assertEqual(chatgpt_browser._first_response_timeout_ms(None), 0)
         self.assertEqual(chatgpt_browser._first_response_timeout_ms(90), 90_000)
+
+    def _send_signed_out(self, **kwargs):
+        self.signed_out_marker.count = AsyncMock(return_value=1)
+        return asyncio.run(
+            chatgpt_browser.send_message_on_page(
+                self.page,
+                chatgpt_browser.CHATGPT_URL,
+                "Hello",
+                kwargs.get("model"),
+                kwargs.get("reasoning_level"),
+                kwargs.get("status_callback"),
+                allow_signed_out=kwargs.get("allow_signed_out", True),
+            )
+        )
+
+    def test_signed_out_page_skips_model_and_reasoning_detection(self) -> None:
+        status_callback = Mock()
+
+        answer, _url = self._send_signed_out(status_callback=status_callback)
+
+        self.assertEqual(answer, "OK.")
+        # The signed-out page has no controls to read, so it must not be probed.
+        self.reasoning_trigger.wait_for.assert_not_awaited()
+        status_callback.assert_any_call(
+            f"Current page: model={chatgpt_browser.SIGNED_OUT_LABEL}, "
+            f"reasoning={chatgpt_browser.SIGNED_OUT_LABEL}, "
+            f"url={self.page.url}"
+        )
+
+    def test_signed_out_page_rejects_a_model_choice(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            self._send_signed_out(model=chatgpt_browser.ChatGPTModel.GPT_5_5)
+
+        self.assertIn("--model", str(caught.exception))
+        self.editor.press_sequentially.assert_not_awaited()
+
+    def test_signed_out_page_rejects_a_reasoning_choice(self) -> None:
+        with self.assertRaises(ValueError):
+            self._send_signed_out(
+                reasoning_level=chatgpt_browser.ReasoningLevel.HIGH
+            )
+
+        self.editor.press_sequentially.assert_not_awaited()
+
+    def test_signed_out_page_is_refused_when_an_account_is_required(self) -> None:
+        with self.assertRaises(chatgpt_browser.SignedOutError) as caught:
+            self._send_signed_out(allow_signed_out=False)
+
+        self.assertIn("cloakgpt login", str(caught.exception))
+        self.editor.press_sequentially.assert_not_awaited()
+
+    def test_lightweight_surface_drives_its_own_selectors(self) -> None:
+        # Only the lightweight composer exists, so its surface must be chosen.
+        self.editor.count = AsyncMock(return_value=0)
+        self.signed_out_marker.count = AsyncMock(return_value=1)
+
+        answer, _url = asyncio.run(
+            chatgpt_browser.send_message_on_page(
+                self.page,
+                chatgpt_browser.CHATGPT_URL,
+                "Hello",
+                None,
+                None,
+                None,
+                allow_signed_out=True,
+            )
+        )
+
+        self.assertEqual(answer, "OK.")
+        self.lightweight_editor.press_sequentially.assert_awaited()
+        self.lightweight_send.click.assert_called_once_with()
+        self.editor.press_sequentially.assert_not_awaited()
+
+    def test_standard_surface_wins_when_both_composers_exist(self) -> None:
+        self.lightweight_editor.count = AsyncMock(return_value=1)
+
+        answer, _url = asyncio.run(
+            chatgpt_browser.send_message_on_page(
+                self.page,
+                chatgpt_browser.CHATGPT_URL,
+                "Hello",
+                None,
+                None,
+                None,
+            )
+        )
+
+        self.assertEqual(answer, "OK.")
+        self.editor.press_sequentially.assert_awaited()
+        self.lightweight_editor.press_sequentially.assert_not_awaited()
+
+    def test_lightweight_state_script_waits_for_streaming_to_end(self) -> None:
+        script = chatgpt_browser.LIGHTWEIGHT_RESPONSE_STATE_SCRIPT
+
+        self.assertIn("li[data-message-role]", script)
+        self.assertIn("data-message-streaming", script)
+        # A greeting turn precedes the prompt, so only a later turn is the reply.
+        self.assertIn("lastAssistant > lastUser", script)
+
+    def test_attribution_heading_is_stripped_from_the_answer(self) -> None:
+        self.assertIn(
+            "[data-message-attribution]",
+            chatgpt_browser.RENDER_MARKDOWN_SCRIPT,
+        )
+
+    def test_missing_composer_keeps_the_original_error(self) -> None:
+        self.page.wait_for_selector = AsyncMock(
+            side_effect=chatgpt_browser.PlaywrightTimeoutError("timed out")
+        )
+
+        with self.assertRaises(chatgpt_browser.PlaywrightTimeoutError):
+            asyncio.run(
+                chatgpt_browser.send_message_on_page(
+                    self.page,
+                    chatgpt_browser.CHATGPT_URL,
+                    "Hello",
+                    None,
+                    None,
+                    None,
+                )
+            )
 
     def test_scales_human_typing_delay_for_long_questions(self) -> None:
         short_range = chatgpt_browser._human_typing_delay_range("Hello")
@@ -513,7 +657,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         composer_ready = False
         status_control_ready = False
 
-        async def wait_for_editor(**_kwargs):
+        async def wait_for_editor(*_args, **_kwargs):
             nonlocal composer_ready
             composer_ready = True
 
@@ -525,7 +669,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         async def status_count():
             return 1 if status_control_ready else 0
 
-        self.editor.wait_for.side_effect = wait_for_editor
+        self.page.wait_for_selector.side_effect = wait_for_editor
         self.reasoning_trigger.wait_for.side_effect = wait_for_status
         self.reasoning_trigger.count.side_effect = status_count
 
@@ -535,9 +679,11 @@ class ChatGPTBrowserTests(unittest.TestCase):
         )
 
         self.assertEqual(answer, "OK.")
-        self.editor.wait_for.assert_awaited_once_with(
+        self.page.wait_for_selector.assert_awaited_once_with(
+            f"{chatgpt_browser.STANDARD_SURFACE.editor_selector}, "
+            f"{chatgpt_browser.LIGHTWEIGHT_SURFACE.editor_selector}",
             state="visible",
-            timeout=30_000,
+            timeout=chatgpt_browser.COMPOSER_TIMEOUT_MS,
         )
         self.reasoning_trigger.wait_for.assert_awaited_once_with(
             state="visible",
@@ -765,12 +911,17 @@ class ChatGPTBrowserTests(unittest.TestCase):
             second_button.click = AsyncMock()
             second_responses = Mock()
             second_responses.count = AsyncMock(return_value=0)
+            second_signed_out = Mock()
+            second_signed_out.count = AsyncMock(return_value=0)
+            second_editor.count = AsyncMock(return_value=1)
             second_page = Mock()
             second_page.url = self.page.url
+            second_page.wait_for_selector = AsyncMock()
             second_page.locator.side_effect = {
                 chatgpt_browser.PROMPT_EDITOR_SELECTOR: second_editor,
                 chatgpt_browser.SEND_BUTTON_SELECTOR: second_button,
                 chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: second_responses,
+                chatgpt_browser.SIGNED_OUT_MARKER_SELECTOR: second_signed_out,
             }.get
 
             entered = 0

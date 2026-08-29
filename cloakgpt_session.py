@@ -24,6 +24,7 @@ from chatgpt_browser import (
     ChatGPTModel,
     DeliveryStateUnknownError,
     ReasoningLevel,
+    SignedOutError,
     _validate_conversation_url,
     launch_chatgpt_context_async,
     send_message_on_page,
@@ -376,12 +377,14 @@ class SessionBroker:
                         status,
                         reuse_page=True,
                         composer_lock=self._composer_lock,
+                        allow_signed_out=False,
                     )
 
                 page = await self._new_page(request_id)
                 try:
                     answer, current_url = await deliver(page)
-                except DeliveryStateUnknownError:
+                except (DeliveryStateUnknownError, SignedOutError):
+                    # Restarting the page cannot sign anyone in.
                     raise
                 except Exception:
                     status("Browser page failed before delivery; restarting it once...")
@@ -418,6 +421,7 @@ class SessionBroker:
                 status,
                 reuse_page=True,
                 composer_lock=self._composer_lock,
+                allow_signed_out=True,
             )
             return {"answer": answer}
         finally:

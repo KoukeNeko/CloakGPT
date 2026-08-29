@@ -21,6 +21,10 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 CHATGPT_URL = "https://chatgpt.com/"
 PROMPT_EDITOR_SELECTOR = "#prompt-textarea"
 SEND_BUTTON_SELECTOR = '[data-testid="send-button"]'
+SIGNED_OUT_MARKER_SELECTOR = 'a[href^="https://chatgpt.com/auth/login"]'
+LIGHTWEIGHT_COMPOSER_SELECTOR = 'textarea[name="prompt"]'
+SIGNED_OUT_LABEL = "signed-out default"
+COMPOSER_TIMEOUT_MS = 30_000
 ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]'
 STOP_BUTTON_SELECTOR = '[data-testid="stop-button"]'
 CITATION_PILL_SELECTOR = '[data-testid="webpage-citation-pill"]'
@@ -208,6 +212,7 @@ class ChatGPTSource:
 RENDER_MARKDOWN_SCRIPT = r"""response => {
   const citationSelector = '[data-testid="webpage-citation-pill"]';
   const interactiveWidgetSelector = '[data-testid="dil-widget-shell"]';
+  const attributionSelector = '[data-message-attribution]';
 
   function children(node) {
     return [...node.childNodes].map(render).join('');
@@ -256,7 +261,9 @@ RENDER_MARKDOWN_SCRIPT = r"""response => {
   function render(node) {
     if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
     if (node.nodeType !== Node.ELEMENT_NODE) return '';
-    if (node.matches(`${citationSelector}, ${interactiveWidgetSelector}`)) return '';
+    if (node.matches(
+      `${citationSelector}, ${interactiveWidgetSelector}, ${attributionSelector}`
+    )) return '';
 
     const tag = node.tagName;
     const content = () => children(node);
@@ -350,6 +357,81 @@ RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId}) => {
       : null
   };
 }"""
+
+
+STANDARD_FIRST_RESPONSE_SCRIPT = """([selector, previousCount]) =>
+  document.querySelectorAll(selector).length > previousCount"""
+
+# The lightweight transcript opens with a greeting turn and is rebuilt when
+# submitting navigates to the conversation, so counting messages cannot tell a
+# reply from that greeting. Position does: a reply always follows the prompt.
+LIGHTWEIGHT_REPLY_INDEX_SNIPPET = """
+  const turns = [...document.querySelectorAll('li[data-message-role]')];
+  let lastUser = -1;
+  let lastAssistant = -1;
+  turns.forEach((turn, index) => {
+    const role = turn.getAttribute('data-message-role');
+    if (role === 'user') lastUser = index;
+    if (role === 'assistant') lastAssistant = index;
+  });
+  const reply = lastUser >= 0 && lastAssistant > lastUser ? turns[lastAssistant] : null;
+"""
+
+LIGHTWEIGHT_FIRST_RESPONSE_SCRIPT = (
+    "() => {" + LIGHTWEIGHT_REPLY_INDEX_SNIPPET + "  return reply !== null;\n}"
+)
+
+LIGHTWEIGHT_RESPONSE_STATE_SCRIPT = (
+    "() => {"
+    + LIGHTWEIGHT_REPLY_INDEX_SNIPPET
+    + """  const text = (reply?.innerText || '').trim();
+  return {
+    progress: text.length,
+    // The attribute is present while streaming and removed once the turn ends.
+    complete: !!reply && !!text && !reply.hasAttribute('data-message-streaming'),
+    status: null
+  };
+}"""
+)
+
+
+@dataclass(frozen=True)
+class ComposerSurface:
+    """One of the composer implementations ChatGPT serves."""
+
+    editor_selector: str
+    send_selector: str
+    assistant_selector: str
+    first_response_script: str
+    state_script: str
+
+
+STANDARD_SURFACE = ComposerSurface(
+    editor_selector=PROMPT_EDITOR_SELECTOR,
+    send_selector=SEND_BUTTON_SELECTOR,
+    assistant_selector=ASSISTANT_MESSAGE_SELECTOR,
+    first_response_script=STANDARD_FIRST_RESPONSE_SCRIPT,
+    state_script=RESPONSE_STATE_SCRIPT,
+)
+LIGHTWEIGHT_SURFACE = ComposerSurface(
+    editor_selector=LIGHTWEIGHT_COMPOSER_SELECTOR,
+    send_selector="button[data-composer-submit]",
+    assistant_selector='li[data-message-role="assistant"]',
+    first_response_script=LIGHTWEIGHT_FIRST_RESPONSE_SCRIPT,
+    state_script=LIGHTWEIGHT_RESPONSE_STATE_SCRIPT,
+)
+
+
+async def _detect_composer_surface(page) -> ComposerSurface:
+    """Wait for whichever composer ChatGPT rendered, preferring the standard one."""
+    await page.wait_for_selector(
+        f"{STANDARD_SURFACE.editor_selector}, {LIGHTWEIGHT_SURFACE.editor_selector}",
+        state="visible",
+        timeout=COMPOSER_TIMEOUT_MS,
+    )
+    if await page.locator(STANDARD_SURFACE.editor_selector).count():
+        return STANDARD_SURFACE
+    return LIGHTWEIGHT_SURFACE
 
 
 def response_stall_seconds() -> float | None:
@@ -543,8 +625,8 @@ async def _extract_sources(page, response) -> list[ChatGPTSource]:
     return sources
 
 
-async def _extract_response(page) -> str:
-    response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
+async def _extract_response(page, surface: ComposerSurface) -> str:
+    response = page.locator(surface.assistant_selector).last
     markdown = await response.evaluate(RENDER_MARKDOWN_SCRIPT)
     return _format_response(markdown, await _extract_sources(page, response))
 
@@ -580,13 +662,12 @@ async def _wait_for_first_response(
     page,
     previous_count: int,
     stall_seconds: float | None,
+    surface: ComposerSurface,
 ) -> None:
     try:
         await page.wait_for_function(
-            """previousCount =>
-            document.querySelectorAll('[data-message-author-role="assistant"]').length
-            > previousCount""",
-            arg=previous_count,
+            surface.first_response_script,
+            arg=[surface.assistant_selector, previous_count],
             timeout=_first_response_timeout_ms(stall_seconds),
         )
     except PlaywrightTimeoutError as error:
@@ -601,19 +682,22 @@ async def _wait_for_reply(
     previous_count: int,
     status_callback: StatusCallback | None,
     stall_seconds: float | None,
+    surface: ComposerSurface,
 ) -> str:
     keepalive_task = asyncio.create_task(_keep_page_active(page))
     try:
-        await _wait_for_first_response(page, previous_count, stall_seconds)
+        await _wait_for_first_response(
+            page, previous_count, stall_seconds, surface
+        )
         _emit_status(status_callback, "ChatGPT is responding...")
-        response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
+        response = page.locator(surface.assistant_selector).last
         turn_id = await response.evaluate(TURN_ID_SCRIPT)
         previous_status = None
         previous_progress = None
         progressed_at = time.monotonic()
         while True:
             state = await page.evaluate(
-                RESPONSE_STATE_SCRIPT,
+                surface.state_script,
                 {"previousCount": previous_count, "turnId": turn_id},
             )
             current_status = state["status"]
@@ -637,7 +721,7 @@ async def _wait_for_reply(
         except asyncio.CancelledError:
             pass
     _emit_status(status_callback, "Collecting response and sources...")
-    return await _extract_response(page)
+    return await _extract_response(page, surface)
 
 
 async def _open_configuration_menu(page):
@@ -857,6 +941,34 @@ async def _set_reasoning_level(page, reasoning_level: ReasoningLevel) -> None:
     raise RuntimeError("ChatGPT did not apply the selected reasoning level")
 
 
+class SignedOutError(RuntimeError):
+    """The profile is signed out but this operation needs an account."""
+
+
+async def _is_signed_out(page) -> bool:
+    return await page.locator(SIGNED_OUT_MARKER_SELECTOR).count() > 0
+
+
+def _signed_out_status(
+    page,
+    model: ChatGPTModel | None,
+    reasoning_level: ReasoningLevel | None,
+    allow_signed_out: bool,
+) -> ChatGPTPageStatus:
+    if not allow_signed_out:
+        raise SignedOutError(
+            "this ChatGPT profile is signed out, and a signed-out page never creates "
+            "the conversation URL a persistent session needs. Run `cloakgpt login`; "
+            "a one-shot `ask` works signed out."
+        )
+    if model is not None or reasoning_level is not None:
+        raise ValueError(
+            "a signed-out ChatGPT page has no model or reasoning controls; drop "
+            "--model/--reasoning, or run `cloakgpt login` to choose them."
+        )
+    return ChatGPTPageStatus(page.url, SIGNED_OUT_LABEL, SIGNED_OUT_LABEL)
+
+
 class DeliveryStateUnknownError(RuntimeError):
     """The prompt was clicked, but completion could not be confirmed."""
 
@@ -871,6 +983,7 @@ async def send_message_on_page(
     *,
     reuse_page: bool = False,
     composer_lock=None,
+    allow_signed_out: bool = False,
 ) -> tuple[str, str]:
     _validate_question(question)
 
@@ -879,27 +992,31 @@ async def send_message_on_page(
         await page.goto(url, wait_until="domcontentloaded")
 
     async with composer_lock or _without_composer_lock():
-        editor = page.locator(PROMPT_EDITOR_SELECTOR)
-        await editor.wait_for(state="visible", timeout=30_000)
+        surface = await _detect_composer_surface(page)
+        editor = page.locator(surface.editor_selector)
 
-        if model is not None:
-            _emit_status(status_callback, f"Selecting model: {model}")
-            await _set_model(page, model)
-        if reasoning_level is not None:
-            _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
-            await _set_reasoning_level(page, reasoning_level)
-
-        status = await _read_page_status_required(page)
+        if await _is_signed_out(page):
+            status = _signed_out_status(
+                page, model, reasoning_level, allow_signed_out
+            )
+        else:
+            if model is not None:
+                _emit_status(status_callback, f"Selecting model: {model}")
+                await _set_model(page, model)
+            if reasoning_level is not None:
+                _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
+                await _set_reasoning_level(page, reasoning_level)
+            status = await _read_page_status_required(page)
         _emit_status(
             status_callback,
             f"Current page: model={status.model}, reasoning={status.reasoning}, url={status.url}",
         )
 
-        previous_count = await page.locator(ASSISTANT_MESSAGE_SELECTOR).count()
+        previous_count = await page.locator(surface.assistant_selector).count()
         _emit_status(status_callback, "Typing message...")
         await _type_question_like_human(editor, question)
 
-        send_button = page.locator(SEND_BUTTON_SELECTOR)
+        send_button = page.locator(surface.send_selector)
         await send_button.wait_for(state="visible", timeout=10_000)
         _emit_status(status_callback, "Sending message...")
         await send_button.click()
@@ -912,6 +1029,7 @@ async def send_message_on_page(
             previous_count,
             status_callback,
             stall_seconds,
+            surface,
         )
         _emit_status(status_callback, "Response complete.")
         return answer, page.url
@@ -947,6 +1065,7 @@ async def _send_message(
             model,
             reasoning_level,
             status_callback,
+            allow_signed_out=True,
         )
     finally:
         await context.close()

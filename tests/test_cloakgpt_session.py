@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+import chatgpt_browser
 import cloakgpt_session
 
 
@@ -530,6 +531,28 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("ttl_seconds", daemon)
         self.assertNotIn("ttl_seconds", self.broker.session_status(session_id))
+
+    @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
+    async def test_one_shot_allows_a_signed_out_profile(self, send) -> None:
+        send.return_value = ("OK.", cloakgpt_session.CHATGPT_URL)
+
+        await self.broker.send_once({"question": "Hello"}, Mock())
+
+        self.assertTrue(send.await_args.kwargs["allow_signed_out"])
+
+    @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
+    async def test_session_send_requires_an_account(self, send) -> None:
+        session_id = self.open_session()["session_id"]
+        send.side_effect = chatgpt_browser.SignedOutError("signed out")
+
+        with self.assertRaises(chatgpt_browser.SignedOutError):
+            await self.broker.send(
+                {"session_id": session_id, "question": "Hello"}, Mock()
+            )
+
+        # Restarting the page cannot sign anyone in, so it must not be retried.
+        self.assertEqual(send.await_count, 1)
+        self.assertFalse(send.await_args.kwargs.get("allow_signed_out", False))
 
     async def test_cancelled_stop_leaves_the_daemon_serving(self) -> None:
         # A client that stops waiting must not leave a daemon that refuses every

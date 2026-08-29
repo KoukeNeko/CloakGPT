@@ -22,6 +22,7 @@ final response with Markdown formatting and citation sources.
 - [Login](#login)
 - [Manage the external browser](#manage-the-external-browser)
 - [Ask ChatGPT](#ask-chatgpt)
+  - [Asking without signing in](#asking-without-signing-in)
 - [Persistent agent sessions](#persistent-agent-sessions)
 - [Select a model and reasoning level](#select-a-model-and-reasoning-level)
 - [User data](#user-data)
@@ -40,7 +41,7 @@ For a packaged release:
 | --- | --- |
 | Operating system | 64-bit Linux, macOS, or Windows on an architecture listed under [Release options and assets](#release-options-and-assets). CloakBrowser is downloaded separately, so its current platform availability is checked during `cloakgpt browser install`. |
 | Network | HTTPS access to GitHub Releases and API, CloakBrowser's official download/license service, and `chatgpt.com`. A TLS-intercepting network must provide its trusted PEM bundle through `SSL_CERT_FILE`. |
-| Account | A user-owned ChatGPT account that can sign in at `chatgpt.com`. Available models, reasoning levels, and web search depend on that account and ChatGPT's current product rules. |
+| Account | A user-owned ChatGPT account that can sign in at `chatgpt.com`. Available models, reasoning levels, and web search depend on that account and ChatGPT's current product rules. A one-shot `ask` also works signed out, with the limits described under [Ask ChatGPT](#ask-chatgpt). |
 | External browser | Permission to download and use CloakBrowser under its separate terms. A license key may be required by the selected CloakBrowser build or plan; `cloakgpt browser info --quick` reports the local state. |
 | Interactive login | A graphical desktop session is required for the initial visible `cloakgpt login` flow. Normal `ask` commands are headless by default after login is saved. |
 | Storage | Plan for at least 500 MB of free space. The CloakGPT executable is separate from the external Chromium download, which CloakBrowser currently describes as approximately 200 MB cached; profiles and multiple cached browser versions need additional space. |
@@ -477,6 +478,18 @@ window:
 ```sh
 cloakgpt ask "Reply only: OK." --headed
 ```
+
+### Asking without signing in
+
+A one-shot `ask` works on a signed-out profile. ChatGPT then picks the model
+itself, so `--model` and `--reasoning` are rejected rather than ignored, and the
+reported page status reads `signed-out default`. ChatGPT serves signed-out
+visitors one of two composers and CloakGPT drives either.
+
+Persistent sessions still need an account. A signed-out conversation is not
+addressable the way `--session` requires, so a session request on a signed-out
+profile fails with a message pointing at `cloakgpt login` instead of sending
+anything.
 
 Every `ask`, including a one-shot new conversation, goes through one local
 daemon and one persistent browser context. Different persistent session IDs and
