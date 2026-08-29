@@ -281,6 +281,26 @@ class ChatGPTBrowserTests(unittest.TestCase):
 
         self.assertIn("no progress", str(caught.exception))
 
+    def test_missing_first_response_reports_unknown_delivery(self) -> None:
+        self.page.wait_for_function = AsyncMock(
+            side_effect=chatgpt_browser.PlaywrightTimeoutError("timed out")
+        )
+
+        with patch("chatgpt_browser.response_stall_seconds", return_value=60):
+            with self.assertRaises(chatgpt_browser.DeliveryStateUnknownError) as caught:
+                asyncio.run(
+                    chatgpt_browser.send_message_on_page(
+                        self.page,
+                        chatgpt_browser.CHATGPT_URL,
+                        "Hello",
+                        None,
+                        None,
+                        None,
+                    )
+                )
+
+        self.assertIn("no progress", str(caught.exception))
+
     def test_unlimited_stall_waits_without_a_playwright_timeout(self) -> None:
         self.assertEqual(chatgpt_browser._first_response_timeout_ms(None), 0)
         self.assertEqual(chatgpt_browser._first_response_timeout_ms(90), 90_000)

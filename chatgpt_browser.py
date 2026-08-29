@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from cloakbrowser import launch_persistent_context, launch_persistent_context_async
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 
 CHATGPT_URL = "https://chatgpt.com/"
@@ -567,13 +568,32 @@ def _first_response_timeout_ms(stall_seconds: float | None) -> float:
     return stall_seconds * MILLISECONDS_PER_SECOND
 
 
-def _stall_message(stall_seconds: float | None) -> str:
-    window = "the stall window" if stall_seconds is None else f"{stall_seconds:g}s"
+def _stall_message(stall_seconds: float) -> str:
     return (
-        f"ChatGPT showed no progress for {window}; the prompt was sent but "
-        f"completion could not be confirmed "
+        f"ChatGPT showed no progress for {stall_seconds:g}s; the prompt was sent "
+        f"but completion could not be confirmed "
         f"(raise or disable this with {RESPONSE_STALL_ENV_VAR})"
     )
+
+
+async def _wait_for_first_response(
+    page,
+    previous_count: int,
+    stall_seconds: float | None,
+) -> None:
+    try:
+        await page.wait_for_function(
+            """previousCount =>
+            document.querySelectorAll('[data-message-author-role="assistant"]').length
+            > previousCount""",
+            arg=previous_count,
+            timeout=_first_response_timeout_ms(stall_seconds),
+        )
+    except PlaywrightTimeoutError as error:
+        # Unlimited waiting passes timeout=0, so Playwright only times out when a
+        # window is configured. An assistant turn that never appears is the same
+        # inert page as one that stops growing, so report it the same way.
+        raise ResponseStalledError(_stall_message(stall_seconds)) from error
 
 
 async def _wait_for_reply(
@@ -584,13 +604,7 @@ async def _wait_for_reply(
 ) -> str:
     keepalive_task = asyncio.create_task(_keep_page_active(page))
     try:
-        await page.wait_for_function(
-            """previousCount =>
-            document.querySelectorAll('[data-message-author-role="assistant"]').length
-            > previousCount""",
-            arg=previous_count,
-            timeout=_first_response_timeout_ms(stall_seconds),
-        )
+        await _wait_for_first_response(page, previous_count, stall_seconds)
         _emit_status(status_callback, "ChatGPT is responding...")
         response = page.locator(ASSISTANT_MESSAGE_SELECTOR).last
         turn_id = await response.evaluate(TURN_ID_SCRIPT)
