@@ -25,6 +25,7 @@ SIGNED_OUT_MARKER_SELECTOR = 'a[href^="https://chatgpt.com/auth/login"]'
 LIGHTWEIGHT_COMPOSER_SELECTOR = 'textarea[name="prompt"]'
 SIGNED_OUT_LABEL = "signed-out default"
 COMPOSER_TIMEOUT_MS = 30_000
+SIGNED_OUT_CONTROL_TIMEOUT_MS = 5_000
 ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]'
 STOP_BUTTON_SELECTOR = '[data-testid="stop-button"]'
 CITATION_PILL_SELECTOR = '[data-testid="webpage-citation-pill"]'
@@ -404,6 +405,9 @@ class ComposerSurface:
     assistant_selector: str
     first_response_script: str
     state_script: str
+    # None means the composer submits on Enter, so newlines are inserted as
+    # text rather than pressed as a key.
+    line_break_shortcut: str | None
 
 
 STANDARD_SURFACE = ComposerSurface(
@@ -412,6 +416,7 @@ STANDARD_SURFACE = ComposerSurface(
     assistant_selector=ASSISTANT_MESSAGE_SELECTOR,
     first_response_script=STANDARD_FIRST_RESPONSE_SCRIPT,
     state_script=RESPONSE_STATE_SCRIPT,
+    line_break_shortcut=LINE_BREAK_SHORTCUT,
 )
 LIGHTWEIGHT_SURFACE = ComposerSurface(
     editor_selector=LIGHTWEIGHT_COMPOSER_SELECTOR,
@@ -419,6 +424,7 @@ LIGHTWEIGHT_SURFACE = ComposerSurface(
     assistant_selector='li[data-message-role="assistant"]',
     first_response_script=LIGHTWEIGHT_FIRST_RESPONSE_SCRIPT,
     state_script=LIGHTWEIGHT_RESPONSE_STATE_SCRIPT,
+    line_break_shortcut=None,
 )
 
 
@@ -429,7 +435,9 @@ async def _detect_composer_surface(page) -> ComposerSurface:
         state="visible",
         timeout=COMPOSER_TIMEOUT_MS,
     )
-    if await page.locator(STANDARD_SURFACE.editor_selector).count():
+    # Deciding on presence would pick a standard composer that exists but is
+    # hidden, and every later action on it would block until it timed out.
+    if await page.locator(STANDARD_SURFACE.editor_selector).first.is_visible():
         return STANDARD_SURFACE
     return LIGHTWEIGHT_SURFACE
 
@@ -478,7 +486,21 @@ def _normalize_line_endings(question: str) -> str:
     return question.replace("\r\n", "\n").replace("\r", "\n")
 
 
-async def _type_question_like_human(editor, question: str) -> None:
+async def _insert_line_break(editor, shortcut: str | None, delay: int) -> None:
+    """Add a newline without letting the composer read it as a submit."""
+    if shortcut is not None:
+        await editor.press(shortcut, delay=delay)
+        return
+    # This composer submits on a bare Enter and may swallow the soft-break
+    # shortcut too, so insert the newline as text and press no key at all.
+    await editor.page.keyboard.insert_text("\n")
+
+
+async def _type_question_like_human(
+    editor,
+    question: str,
+    surface: ComposerSurface,
+) -> None:
     await editor.fill("")
     await editor.focus()
     normalized_question = _normalize_line_endings(question)
@@ -487,9 +509,9 @@ async def _type_question_like_human(editor, question: str) -> None:
         delay = random.randint(minimum_delay, maximum_delay)
         # A literal newline reaches the composer as a plain Enter key press, which
         # submits the prompt and splits a multi-line question into one message per
-        # line; the soft-break shortcut keeps the whole prompt in a single message.
+        # line; a soft break keeps the whole prompt in a single message.
         if character == "\n":
-            await editor.press(LINE_BREAK_SHORTCUT, delay=delay)
+            await _insert_line_break(editor, surface.line_break_shortcut, delay)
             continue
         await editor.press_sequentially(character, delay=delay)
 
@@ -703,13 +725,15 @@ async def _wait_for_reply(
             current_status = state["status"]
             if current_status and current_status != previous_status:
                 _emit_status(status_callback, f"ChatGPT activity: {current_status}")
+                # The label blinks off between phases, so remembering only what
+                # was announced keeps one activity from being reported twice.
+                previous_status = current_status
             # Growing text or a changed activity label both mean ChatGPT is still
             # working, so only a completely inert page runs the stall window down.
             current_progress = (current_status, state.get("progress"))
             if current_progress != previous_progress:
                 previous_progress = current_progress
                 progressed_at = time.monotonic()
-            previous_status = current_status
             if state["complete"]:
                 break
             _raise_if_stalled(progressed_at, stall_seconds)
@@ -946,7 +970,19 @@ class SignedOutError(RuntimeError):
 
 
 async def _is_signed_out(page) -> bool:
-    return await page.locator(SIGNED_OUT_MARKER_SELECTOR).count() > 0
+    """Signed out means a login link and no model control, not just the link."""
+    if not await page.locator(SIGNED_OUT_MARKER_SELECTOR).count():
+        return False
+    # A signed-in page can link to /auth/login too, and its controls can render
+    # late, so only their continued absence settles it.
+    try:
+        await page.locator(REASONING_TRIGGER_SELECTOR).first.wait_for(
+            state="visible",
+            timeout=SIGNED_OUT_CONTROL_TIMEOUT_MS,
+        )
+    except PlaywrightTimeoutError:
+        return True
+    return False
 
 
 def _signed_out_status(
@@ -1014,7 +1050,7 @@ async def send_message_on_page(
 
         previous_count = await page.locator(surface.assistant_selector).count()
         _emit_status(status_callback, "Typing message...")
-        await _type_question_like_human(editor, question)
+        await _type_question_like_human(editor, question, surface)
 
         send_button = page.locator(surface.send_selector)
         await send_button.wait_for(state="visible", timeout=10_000)

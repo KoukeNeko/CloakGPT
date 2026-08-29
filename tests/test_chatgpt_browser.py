@@ -15,6 +15,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.editor = Mock()
         self.editor.count = AsyncMock(return_value=1)
         self.editor.wait_for = AsyncMock()
+        self.editor.first.is_visible = AsyncMock(return_value=True)
         self.editor.fill = AsyncMock()
         self.editor.focus = AsyncMock()
         self.editor.press_sequentially = AsyncMock()
@@ -25,6 +26,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.reasoning_trigger = Mock()
         self.reasoning_trigger.count = AsyncMock(return_value=1)
         self.reasoning_trigger.wait_for = AsyncMock()
+        self.reasoning_trigger.first = self.reasoning_trigger
         self.reasoning_trigger.click = AsyncMock()
         self.reasoning_trigger.inner_text = AsyncMock(return_value="高い")
         self.root_menu = Mock()
@@ -100,6 +102,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.responses.last.locator.return_value = self.citation_pills
         self.lightweight_editor = Mock()
         self.lightweight_editor.count = AsyncMock(return_value=0)
+        self.lightweight_editor.first.is_visible = AsyncMock(return_value=True)
         self.lightweight_editor.wait_for = AsyncMock()
         self.lightweight_editor.fill = AsyncMock()
         self.lightweight_editor.focus = AsyncMock()
@@ -188,7 +191,11 @@ class ChatGPTBrowserTests(unittest.TestCase):
         editor.press_sequentially = AsyncMock()
 
         with patch("chatgpt_browser.random.randint", side_effect=[31, 47, 39]):
-            asyncio.run(chatgpt_browser._type_question_like_human(editor, "A中🙂"))
+            asyncio.run(
+                chatgpt_browser._type_question_like_human(
+                    editor, "A中🙂", chatgpt_browser.STANDARD_SURFACE
+                )
+            )
 
         editor.fill.assert_awaited_once_with("")
         editor.focus.assert_awaited_once_with()
@@ -209,7 +216,11 @@ class ChatGPTBrowserTests(unittest.TestCase):
         editor.press = AsyncMock()
 
         with patch("chatgpt_browser.random.randint", side_effect=[11, 22, 33]):
-            asyncio.run(chatgpt_browser._type_question_like_human(editor, "A\r\nB"))
+            asyncio.run(
+                chatgpt_browser._type_question_like_human(
+                    editor, "A\r\nB", chatgpt_browser.STANDARD_SURFACE
+                )
+            )
 
         self.assertEqual(
             [call.args[0] for call in editor.press_sequentially.await_args_list],
@@ -330,6 +341,9 @@ class ChatGPTBrowserTests(unittest.TestCase):
 
     def _send_signed_out(self, **kwargs):
         self.signed_out_marker.count = AsyncMock(return_value=1)
+        self.reasoning_trigger.wait_for = AsyncMock(
+            side_effect=chatgpt_browser.PlaywrightTimeoutError("timed out")
+        )
         return asyncio.run(
             chatgpt_browser.send_message_on_page(
                 self.page,
@@ -348,8 +362,8 @@ class ChatGPTBrowserTests(unittest.TestCase):
         answer, _url = self._send_signed_out(status_callback=status_callback)
 
         self.assertEqual(answer, "OK.")
-        # The signed-out page has no controls to read, so it must not be probed.
-        self.reasoning_trigger.wait_for.assert_not_awaited()
+        # The signed-out page has no controls to read, so it is never opened.
+        self.reasoning_trigger.click.assert_not_called()
         status_callback.assert_any_call(
             f"Current page: model={chatgpt_browser.SIGNED_OUT_LABEL}, "
             f"reasoning={chatgpt_browser.SIGNED_OUT_LABEL}, "
@@ -379,8 +393,9 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.editor.press_sequentially.assert_not_awaited()
 
     def test_lightweight_surface_drives_its_own_selectors(self) -> None:
-        # Only the lightweight composer exists, so its surface must be chosen.
+        # Only the lightweight composer is visible, so its surface is chosen.
         self.editor.count = AsyncMock(return_value=0)
+        self.editor.first.is_visible = AsyncMock(return_value=False)
         self.signed_out_marker.count = AsyncMock(return_value=1)
 
         answer, _url = asyncio.run(
@@ -448,6 +463,132 @@ class ChatGPTBrowserTests(unittest.TestCase):
                     None,
                 )
             )
+
+    def test_a_login_link_alone_does_not_mean_signed_out(self) -> None:
+        # A signed-in page may still link to /auth/login; its model control is
+        # what actually distinguishes the two states.
+        self.signed_out_marker.count = AsyncMock(return_value=1)
+
+        answer, _url = asyncio.run(
+            chatgpt_browser.send_message_on_page(
+                self.page,
+                chatgpt_browser.CHATGPT_URL,
+                "Hello",
+                None,
+                None,
+                None,
+            )
+        )
+
+        self.assertEqual(answer, "OK.")
+        self.reasoning_trigger.wait_for.assert_awaited()
+
+    def test_signed_out_when_the_model_control_never_appears(self) -> None:
+        self.signed_out_marker.count = AsyncMock(return_value=1)
+        self.reasoning_trigger.wait_for = AsyncMock(
+            side_effect=chatgpt_browser.PlaywrightTimeoutError("timed out")
+        )
+        status_callback = Mock()
+
+        answer, _url = asyncio.run(
+            chatgpt_browser.send_message_on_page(
+                self.page,
+                chatgpt_browser.CHATGPT_URL,
+                "Hello",
+                None,
+                None,
+                status_callback,
+                allow_signed_out=True,
+            )
+        )
+
+        self.assertEqual(answer, "OK.")
+        status_callback.assert_any_call(
+            f"Current page: model={chatgpt_browser.SIGNED_OUT_LABEL}, "
+            f"reasoning={chatgpt_browser.SIGNED_OUT_LABEL}, "
+            f"url={self.page.url}"
+        )
+
+    def test_surface_is_chosen_by_visibility_not_mere_presence(self) -> None:
+        # A standard composer that exists but is hidden must not be driven.
+        self.editor.count = AsyncMock(return_value=1)
+        self.editor.first.is_visible = AsyncMock(return_value=False)
+        self.lightweight_editor.count = AsyncMock(return_value=1)
+
+        answer, _url = asyncio.run(
+            chatgpt_browser.send_message_on_page(
+                self.page,
+                chatgpt_browser.CHATGPT_URL,
+                "Hello",
+                None,
+                None,
+                None,
+            )
+        )
+
+        self.assertEqual(answer, "OK.")
+        self.lightweight_editor.press_sequentially.assert_awaited()
+        self.editor.press_sequentially.assert_not_awaited()
+
+    def test_lightweight_line_break_avoids_any_key_press(self) -> None:
+        # That composer submits on Enter, so a newline must not be a key press.
+        keyboard = Mock()
+        keyboard.insert_text = AsyncMock()
+        self.lightweight_editor.page = Mock(keyboard=keyboard)
+
+        asyncio.run(
+            chatgpt_browser._type_question_like_human(
+                self.lightweight_editor,
+                "A\nB",
+                chatgpt_browser.LIGHTWEIGHT_SURFACE,
+            )
+        )
+
+        keyboard.insert_text.assert_awaited_once_with("\n")
+        self.lightweight_editor.press.assert_not_awaited()
+
+    def test_standard_line_break_still_uses_the_soft_break_shortcut(self) -> None:
+        asyncio.run(
+            chatgpt_browser._type_question_like_human(
+                self.editor,
+                "A\nB",
+                chatgpt_browser.STANDARD_SURFACE,
+            )
+        )
+
+        self.assertEqual(
+            self.editor.press.await_args.args[0],
+            chatgpt_browser.LINE_BREAK_SHORTCUT,
+        )
+
+    def test_an_unchanged_activity_is_announced_once(self) -> None:
+        # The label blinks off between phases; that is not a new activity.
+        states = [
+            {"complete": False, "status": "思考中", "progress": 1},
+            {"complete": False, "status": None, "progress": 2},
+            {"complete": False, "status": "思考中", "progress": 3},
+            {"complete": True, "status": None, "progress": 4},
+        ]
+        self.page.evaluate = AsyncMock(side_effect=states)
+        status_callback = Mock()
+
+        asyncio.run(
+            chatgpt_browser.send_message_on_page(
+                self.page,
+                chatgpt_browser.CHATGPT_URL,
+                "Hello",
+                None,
+                None,
+                status_callback,
+            )
+        )
+
+        announcements = [
+            call.args[0]
+            for call in status_callback.call_args_list
+            if call.args and call.args[0].startswith("ChatGPT activity:")
+        ]
+        self.assertEqual(announcements, ["ChatGPT activity: 思考中"])
 
     def test_scales_human_typing_delay_for_long_questions(self) -> None:
         short_range = chatgpt_browser._human_typing_delay_range("Hello")
@@ -914,6 +1055,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             second_signed_out = Mock()
             second_signed_out.count = AsyncMock(return_value=0)
             second_editor.count = AsyncMock(return_value=1)
+            second_editor.first.is_visible = AsyncMock(return_value=True)
             second_page = Mock()
             second_page.url = self.page.url
             second_page.wait_for_selector = AsyncMock()
