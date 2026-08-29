@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from collections.abc import Sequence
 
 from cloakbrowser.__main__ import main as cloakbrowser_main
@@ -22,6 +23,12 @@ from cloakgpt_session import (
     DaemonNotRunningError,
     request_broker,
     run_broker,
+)
+from cloakgpt_skill import (
+    bundled_skill_text,
+    install_command_text,
+    outdated_skill_paths,
+    refresh_skill,
 )
 from cloakgpt_update import (
     consume_windows_update_result,
@@ -409,6 +416,33 @@ def _stop_daemon_for_update() -> None:
     # succeed and leave the next command to fail on a profile still in use.
 
 
+SKILL_REFRESH_PROMPT = "Update the use-cloakgpt skill now? [Y/n] "
+DECLINED_ANSWERS = {"n", "no"}
+
+
+def _offer_skill_refresh(outdated: list[Path]) -> None:
+    """Report a skill that no longer matches this build, and offer to refresh."""
+    if not outdated:
+        return
+    print(
+        f"The installed use-cloakgpt skill differs from this build "
+        f"({len(outdated)} copy/copies)."
+    )
+    # An agent runs its instructions, so refreshing it needs a person's answer;
+    # anywhere without one, the command is printed instead of being run.
+    if sys.stdin.isatty():
+        try:
+            answer = input(SKILL_REFRESH_PROMPT)
+        except EOFError:
+            answer = "n"
+        if answer.strip().lower() not in DECLINED_ANSWERS:
+            if refresh_skill():
+                print("Skill updated. Restart your agent to reload it.")
+                return
+            print("Could not run the skills installer.")
+    print(f"Refresh it with: {install_command_text()}")
+
+
 def _run_update_command(args) -> int:
     if args.channel and args.target_version:
         raise ValueError("--channel and --version cannot be used together")
@@ -419,7 +453,17 @@ def _run_update_command(args) -> int:
         status_callback=show_status,
         stop_daemon=_stop_daemon_for_update,
     )
+    bundled = bundled_skill_text()
+    outdated = outdated_skill_paths(bundled)
     if args.json_output:
+        result = {
+            **result,
+            "skill": {
+                "bundled": bundled is not None,
+                "outdated": [str(path) for path in outdated],
+                "install_command": install_command_text(),
+            },
+        }
         print(json.dumps(result, ensure_ascii=False))
         return 0
 
@@ -436,6 +480,7 @@ def _run_update_command(args) -> int:
         )
     else:
         print(f"Updated CloakGPT to {result['target']}.")
+    _offer_skill_refresh(outdated)
     return 0
 
 

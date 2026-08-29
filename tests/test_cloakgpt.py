@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -289,6 +290,102 @@ class CloakGPTCliTests(unittest.TestCase):
             },
             status_callback=cloakgpt.show_status,
         )
+
+    def _update_result(self):
+        return {
+            "current": "v0.1.1-pre.11",
+            "target": "v0.1.1-pre.12",
+            "channel": "prerelease",
+            "asset": "cloakgpt-macos-arm64",
+            "status": "updated",
+        }
+
+    @patch("cloakgpt.refresh_skill")
+    @patch("cloakgpt.outdated_skill_paths")
+    @patch("cloakgpt.update_cloakgpt")
+    def test_update_prints_the_skill_command_when_not_interactive(
+        self, update, outdated, refresh
+    ) -> None:
+        update.return_value = self._update_result()
+        outdated.return_value = [Path("/home/someone/.claude/skills/x/SKILL.md")]
+        output = io.StringIO()
+
+        with patch("sys.stdin.isatty", return_value=False):
+            with redirect_stdout(output):
+                result = cloakgpt.main(["update", "--channel", "prerelease"])
+
+        self.assertEqual(result, 0)
+        self.assertIn("skills add", output.getvalue())
+        refresh.assert_not_called()
+
+    @patch("cloakgpt.refresh_skill")
+    @patch("cloakgpt.outdated_skill_paths")
+    @patch("cloakgpt.update_cloakgpt")
+    def test_update_offers_to_refresh_the_skill_when_interactive(
+        self, update, outdated, refresh
+    ) -> None:
+        update.return_value = self._update_result()
+        outdated.return_value = [Path("/home/someone/.claude/skills/x/SKILL.md")]
+        refresh.return_value = True
+
+        with patch("sys.stdin.isatty", return_value=True):
+            with patch("builtins.input", return_value=""):
+                with redirect_stdout(io.StringIO()):
+                    result = cloakgpt.main(["update", "--channel", "prerelease"])
+
+        self.assertEqual(result, 0)
+        refresh.assert_called_once_with()
+
+    @patch("cloakgpt.refresh_skill")
+    @patch("cloakgpt.outdated_skill_paths")
+    @patch("cloakgpt.update_cloakgpt")
+    def test_declining_the_offer_leaves_the_skill_alone(
+        self, update, outdated, refresh
+    ) -> None:
+        update.return_value = self._update_result()
+        outdated.return_value = [Path("/home/someone/.claude/skills/x/SKILL.md")]
+        output = io.StringIO()
+
+        with patch("sys.stdin.isatty", return_value=True):
+            with patch("builtins.input", return_value="n"):
+                with redirect_stdout(output):
+                    cloakgpt.main(["update", "--channel", "prerelease"])
+
+        refresh.assert_not_called()
+        self.assertIn("skills add", output.getvalue())
+
+    @patch("cloakgpt.refresh_skill")
+    @patch("cloakgpt.outdated_skill_paths")
+    @patch("cloakgpt.update_cloakgpt")
+    def test_matching_skill_is_not_mentioned(self, update, outdated, refresh) -> None:
+        update.return_value = self._update_result()
+        outdated.return_value = []
+        output = io.StringIO()
+
+        with patch("sys.stdin.isatty", return_value=True):
+            with redirect_stdout(output):
+                cloakgpt.main(["update", "--channel", "prerelease"])
+
+        self.assertNotIn("skill", output.getvalue().lower())
+        refresh.assert_not_called()
+
+    @patch("cloakgpt.outdated_skill_paths")
+    @patch("cloakgpt.update_cloakgpt")
+    def test_json_output_reports_the_skill_state(self, update, outdated) -> None:
+        update.return_value = self._update_result()
+        outdated.return_value = [Path("/home/someone/.claude/skills/x/SKILL.md")]
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            cloakgpt.main(["update", "--channel", "prerelease", "--json"])
+
+        payload = json.loads(output.getvalue())
+        self.assertTrue(payload["skill"]["bundled"])
+        self.assertEqual(
+            payload["skill"]["outdated"],
+            ["/home/someone/.claude/skills/x/SKILL.md"],
+        )
+        self.assertIn("skills add", payload["skill"]["install_command"])
 
     @patch("cloakgpt.request_broker")
     def test_update_refuses_while_an_unreachable_daemon_holds_the_profile(

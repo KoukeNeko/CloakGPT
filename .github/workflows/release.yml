@@ -158,6 +158,31 @@ jobs:
           )
           if expected not in output or "${{ matrix.asset }}" not in output:
               raise SystemExit(f"unexpected build metadata: {output!r}")
+      - name: Verify the bundled agent skill
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import json
+          import subprocess
+          from pathlib import Path
+
+          output = subprocess.check_output(
+              [
+                  str(Path("dist/${{ matrix.asset }}").resolve()),
+                  "update",
+                  "--check",
+                  "--channel",
+                  "prerelease",
+                  "--json",
+              ],
+              text=True,
+              encoding="utf-8",
+          )
+          skill = json.loads(output).get("skill", {})
+          if not skill.get("bundled"):
+              raise SystemExit(f"packaged build cannot read its skill: {output!r}")
+
       - name: Smoke test updater TLS
         env:
           GITHUB_TOKEN: ${{ github.token }}

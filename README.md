@@ -213,6 +213,15 @@ cloakgpt update --version v0.1.1-pre.1
 downgrade the installed build. Source checkouts do not overwrite themselves;
 update those with Git instead.
 
+Every `update` run also compares the `use-cloakgpt` skill installed for your
+agents against the one that build ships. A copy that differs is reported; in an
+interactive terminal you are asked whether to refresh it, and anywhere else the
+reinstall command is printed instead. CloakGPT never rewrites an agent's skill
+without that answer, because an agent follows those instructions as given.
+Refreshing delegates to the official skills CLI, and the agent has to be
+restarted afterwards to reload it. `--json` reports the same state under a
+`skill` key.
+
 Before replacement, CloakGPT verifies the release checksum, GitHub asset
 digest, embedded version, and bundled Playwright driver. An actual update stops
 the session daemon but preserves the browser profile and persistent session

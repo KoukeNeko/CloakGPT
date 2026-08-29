@@ -13,11 +13,17 @@ playwright_datas, playwright_binaries, playwright_hiddenimports = collect_all(
     "playwright"
 )
 
+# The skill ships with the build so a packaged CloakGPT can tell whether the
+# copy installed for an agent still matches the instructions it expects.
+skill_datas = [
+    ("skills/use-cloakgpt/SKILL.md", "skills/use-cloakgpt"),
+]
+
 a = Analysis(
     ["cloakgpt.py"],
     pathex=[],
     binaries=cloakbrowser_binaries + certifi_binaries + playwright_binaries,
-    datas=cloakbrowser_datas + certifi_datas + playwright_datas,
+    datas=cloakbrowser_datas + certifi_datas + playwright_datas + skill_datas,
     hiddenimports=(
         cloakbrowser_hiddenimports + certifi_hiddenimports + playwright_hiddenimports
     ),
