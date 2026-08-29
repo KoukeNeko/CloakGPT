@@ -458,12 +458,15 @@ cloakgpt ask "Reply only: OK."
 ```
 
 `ask` starts a new conversation. It runs headless by default, sends the message,
-and waits up to one hour for a completed response, because generation time
+and puts no limit on how long a response may take, because generation time
 depends on the model and prompt. Completion is detected from ChatGPT's active
-generation and assistant-turn state; press Ctrl+C to stop manually. A request
-that passes the deadline reports an unknown delivery state and releases its
-browser page, so one stalled page cannot pin the daemon's browser open. Set
-`CLOAKGPT_RESPONSE_TIMEOUT_SECONDS` to another number of seconds, or to `0` to
+generation and assistant-turn state; press Ctrl+C to stop manually.
+
+What is bounded is inactivity. Growing response text or a changed activity label
+restarts a 15-minute stall window, so a long generation is never interrupted,
+while a page that goes completely inert reports an unknown delivery state and
+releases its browser page instead of pinning the daemon's browser open. Set
+`CLOAKGPT_RESPONSE_STALL_SECONDS` to another number of seconds, or to `0` to
 wait indefinitely. Use `--headed` when you want to observe or debug the browser
 window:
 
