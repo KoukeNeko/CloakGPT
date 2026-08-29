@@ -20,7 +20,6 @@ from chatgpt_browser import (
 )
 from cloakgpt_session import (
     DaemonNotRunningError,
-    DaemonUnavailableError,
     request_broker,
     run_broker,
 )
@@ -402,9 +401,12 @@ def _run_daemon_control(command: str, force: bool) -> int:
 def _stop_daemon_for_update() -> None:
     try:
         request_broker({"operation": "stop"}, auto_start=False)
-    except DaemonUnavailableError:
-        # A daemon that cannot be reached is already not holding the profile.
+    except DaemonNotRunningError:
+        # Nothing owns the browser profile, so the update can go ahead.
         return
+    # A daemon that is running but unreachable still owns the profile, so its
+    # error is reported rather than swallowed; the update would otherwise
+    # succeed and leave the next command to fail on a profile still in use.
 
 
 def _run_update_command(args) -> int:

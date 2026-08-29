@@ -5,6 +5,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import Mock, patch
 
 import cloakgpt
+import cloakgpt_session
 
 
 class CloakGPTCliTests(unittest.TestCase):
@@ -290,6 +291,26 @@ class CloakGPTCliTests(unittest.TestCase):
         )
 
     @patch("cloakgpt.request_broker")
+    def test_update_refuses_while_an_unreachable_daemon_holds_the_profile(
+        self, request
+    ) -> None:
+        # An unreachable daemon is alive and still owns the browser profile.
+        request.side_effect = cloakgpt_session.DaemonUnavailableError(
+            "could not connect to the CloakGPT daemon (pid 42)"
+        )
+
+        with self.assertRaises(cloakgpt_session.DaemonUnavailableError):
+            cloakgpt._stop_daemon_for_update()
+
+    @patch("cloakgpt.request_broker")
+    def test_update_proceeds_when_no_daemon_is_running(self, request) -> None:
+        request.side_effect = cloakgpt.DaemonNotRunningError(
+            "CloakGPT daemon is not running"
+        )
+
+        self.assertIsNone(cloakgpt._stop_daemon_for_update())
+
+    @patch("cloakgpt.request_broker")
     def test_status_reports_a_stopped_daemon_as_normal_output(self, request) -> None:
         request.side_effect = cloakgpt.DaemonNotRunningError(
             "CloakGPT daemon is not running"
@@ -337,7 +358,7 @@ class CloakGPTCliTests(unittest.TestCase):
 
     @patch("cloakgpt.request_broker")
     def test_an_unreachable_daemon_is_still_an_error(self, request) -> None:
-        request.side_effect = cloakgpt.DaemonUnavailableError(
+        request.side_effect = cloakgpt_session.DaemonUnavailableError(
             "could not connect to the CloakGPT daemon (pid 42)"
         )
         errors = io.StringIO()
