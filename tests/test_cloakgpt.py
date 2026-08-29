@@ -373,7 +373,10 @@ class CloakGPTCliTests(unittest.TestCase):
     @patch("cloakgpt.update_cloakgpt")
     def test_json_output_reports_the_skill_state(self, update, outdated) -> None:
         update.return_value = self._update_result()
-        outdated.return_value = [Path("/home/someone/.claude/skills/x/SKILL.md")]
+        # Compare against the same path object so the assertion holds on
+        # Windows, where a stringified path uses backslashes.
+        skill_path = Path("/home/someone/.claude/skills/x/SKILL.md")
+        outdated.return_value = [skill_path]
         output = io.StringIO()
 
         with redirect_stdout(output):
@@ -381,10 +384,7 @@ class CloakGPTCliTests(unittest.TestCase):
 
         payload = json.loads(output.getvalue())
         self.assertTrue(payload["skill"]["bundled"])
-        self.assertEqual(
-            payload["skill"]["outdated"],
-            ["/home/someone/.claude/skills/x/SKILL.md"],
-        )
+        self.assertEqual(payload["skill"]["outdated"], [str(skill_path)])
         self.assertIn("skills add", payload["skill"]["install_command"])
 
     @patch("cloakgpt.request_broker")
