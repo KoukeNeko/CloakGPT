@@ -17,6 +17,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.editor.fill = AsyncMock()
         self.editor.focus = AsyncMock()
         self.editor.press_sequentially = AsyncMock()
+        self.editor.press = AsyncMock()
         self.send_button = Mock()
         self.send_button.wait_for = AsyncMock()
         self.send_button.click = AsyncMock()
@@ -175,6 +176,31 @@ class ChatGPTBrowserTests(unittest.TestCase):
                 unittest.mock.call("中", delay=47),
                 unittest.mock.call("🙂", delay=39),
             ],
+        )
+
+    def test_types_line_breaks_as_soft_breaks_instead_of_submitting(self) -> None:
+        editor = Mock()
+        editor.fill = AsyncMock()
+        editor.focus = AsyncMock()
+        editor.press_sequentially = AsyncMock()
+        editor.press = AsyncMock()
+
+        with patch("chatgpt_browser.random.randint", side_effect=[11, 22, 33]):
+            asyncio.run(chatgpt_browser._type_question_like_human(editor, "A\r\nB"))
+
+        self.assertEqual(
+            [call.args[0] for call in editor.press_sequentially.await_args_list],
+            ["A", "B"],
+        )
+        editor.press.assert_awaited_once_with(
+            chatgpt_browser.LINE_BREAK_SHORTCUT,
+            delay=22,
+        )
+
+    def test_normalizes_carriage_returns_to_single_line_breaks(self) -> None:
+        self.assertEqual(
+            chatgpt_browser._normalize_line_endings("a\r\nb\rc\nd"),
+            "a\nb\nc\nd",
         )
 
     def test_scales_human_typing_delay_for_long_questions(self) -> None:

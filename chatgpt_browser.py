@@ -43,6 +43,7 @@ HUMAN_TYPING_TARGET_DURATION_MS = 4_500
 HUMAN_TYPING_MIN_DELAY_MS = 6
 HUMAN_TYPING_MAX_DELAY_MS = 90
 HUMAN_TYPING_JITTER = 0.35
+LINE_BREAK_SHORTCUT = "Shift+Enter"
 KEEPALIVE_SCROLL_MIN_INTERVAL_SECONDS = 8.0
 KEEPALIVE_SCROLL_MAX_INTERVAL_SECONDS = 18.0
 KEEPALIVE_SCROLL_MIN_DISTANCE = 120
@@ -368,15 +369,24 @@ def _human_typing_delay_range(question: str) -> tuple[int, int]:
     return minimum_delay, maximum_delay
 
 
+def _normalize_line_endings(question: str) -> str:
+    return question.replace("\r\n", "\n").replace("\r", "\n")
+
+
 async def _type_question_like_human(editor, question: str) -> None:
     await editor.fill("")
     await editor.focus()
-    minimum_delay, maximum_delay = _human_typing_delay_range(question)
-    for character in question:
-        await editor.press_sequentially(
-            character,
-            delay=random.randint(minimum_delay, maximum_delay),
-        )
+    normalized_question = _normalize_line_endings(question)
+    minimum_delay, maximum_delay = _human_typing_delay_range(normalized_question)
+    for character in normalized_question:
+        delay = random.randint(minimum_delay, maximum_delay)
+        # A literal newline reaches the composer as a plain Enter key press, which
+        # submits the prompt and splits a multi-line question into one message per
+        # line; the soft-break shortcut keeps the whole prompt in a single message.
+        if character == "\n":
+            await editor.press(LINE_BREAK_SHORTCUT, delay=delay)
+            continue
+        await editor.press_sequentially(character, delay=delay)
 
 
 async def _keep_page_active(page) -> None:
