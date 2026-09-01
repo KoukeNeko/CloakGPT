@@ -3,12 +3,19 @@
 # CloakGPT
 
 [![CI](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/KoukeNeko/CloakGPT)](https://github.com/KoukeNeko/CloakGPT/releases/latest)
+[![License](https://img.shields.io/github/license/KoukeNeko/CloakGPT)](LICENSE)
 
-CloakGPT is a CLI that automates a user-owned ChatGPT session through
-CloakBrowser. It can start conversations, keep persistent agent sessions, run
-different sessions concurrently in one shared browser, select an available
-model and reasoning level, report ChatGPT's live page status, and return the
-final response with Markdown formatting and citation sources.
+**Use your own ChatGPT browser session from the terminal.**
+
+CloakGPT is a local CLI that drives ChatGPT through CloakBrowser. **It does not
+use the OpenAI API** — it operates the account you are already signed in to.
+
+- Persistent multi-turn conversations you can return to
+- Independent sessions running concurrently in one shared browser
+- Model and reasoning-level selection, or leave the page as it is
+- Markdown answers with their citation sources
+- A portable Agent Skill so coding agents can drive it safely
 
 ## Requirements
 
@@ -150,6 +157,17 @@ CloakGPT is an unofficial browser-automation project. It is not affiliated with
 OpenAI, and using it is subject to the terms of the services it automates.
 CloakBrowser is a separately downloaded external binary under its own license and
 trust boundary. Full text: [Legal](docs/legal.md).
+
+## Documentation
+
+| Page | What it covers |
+| --- | --- |
+| [Installation](docs/installation.md) | Requirements in full, release channels and assets, updating, uninstalling |
+| [Usage](docs/usage.md) | Login, browser management, waiting and JSONL contracts, sessions, page settings |
+| [Agent setup](docs/agent-setup.md) | Having a coding agent install and verify CloakGPT for you |
+| [Security model](docs/security-model.md) | Trust boundaries and where your data lives |
+| [Contributing](CONTRIBUTING.md) | Running from source, tests, building |
+| [Legal](docs/legal.md) | Full disclaimer |
 
 ## License
 
