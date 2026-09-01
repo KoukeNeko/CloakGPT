@@ -163,7 +163,7 @@ confirmed non-interactive removal, pass `--yes` on Linux/macOS or `-Yes` on
 Windows. Set `CLOAKGPT_INSTALL_DIR` or pass Windows `-InstallDir` if a custom
 executable destination was used. The uninstaller also honors
 `CLOAKGPT_DATA_DIR`, `CLOAKBROWSER_CACHE_DIR`, `CODEX_HOME`, `XDG_DATA_HOME`,
-and the platform defaults documented under [User data](../README.md#user-data).
+and the platform defaults documented under [User data](security-model.md#user-data).
 
 When `npx` is available, the script asks the official Agent Skills CLI to find
 and remove every global `use-cloakgpt` agent link, then removes known native

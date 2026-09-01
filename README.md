@@ -135,100 +135,24 @@ agent when required.
 Want a coding agent to perform the whole installation and verify it? Hand it the
 task in [Agent setup](docs/agent-setup.md).
 
-## User data
+## Security and limitations
 
-Packaged executables store the persistent browser profile and last conversation
-URL in the platform's user data directory:
+CloakGPT is a local, user-level CLI, not a sandbox or an authorization service.
+It intentionally drives a signed-in browser profile and can send messages, so
+anyone allowed to run it is trusted to operate that profile within the authority
+you granted. Session IDs select local conversations; they are not ChatGPT
+credentials. The browser profile, daemon metadata, and conversation URLs are
+sensitive local data and must not be committed or published.
 
-| Platform | Default data directory |
-| --- | --- |
-| Linux | `$XDG_DATA_HOME/CloakGPT`, or `~/.local/share/CloakGPT` |
-| macOS | `~/Library/Application Support/CloakGPT` |
-| Windows | `%LOCALAPPDATA%\CloakGPT` |
+Full trust boundaries and data locations: [Security model](docs/security-model.md).
 
-Set `CLOAKGPT_DATA_DIR` to override this location. Source checkouts retain the
-original behavior and store data in the repository unless the environment
-variable is set.
-
-## Security model
-
-CloakGPT is a local user-level CLI, not a sandbox or an authorization service.
-It intentionally controls a signed-in ChatGPT browser profile and can send
-messages. A user or agent permitted to execute `cloakgpt` under the same
-operating-system account is therefore trusted to operate that profile only
-within the authority the user granted.
-
-Persistent session IDs select local conversations; they are not ChatGPT
-credentials or daemon authentication keys. The daemon uses a separate random
-authentication key stored in the CloakGPT data directory. On POSIX systems,
-metadata files containing that key are written with mode `0600`. The browser
-profile, daemon metadata, session IDs, and conversation URLs should still be
-treated as sensitive local data and must not be committed or published.
-
-Official installers download a platform asset and its `.sha256` file from the
-project's GitHub Release, then verify the checksum before installation. macOS
-release assets are Developer ID signed and notarized. Windows assets are not
-currently code-signed, so Windows may display a warning. CloakBrowser is a
-separately downloaded external binary governed by its own license and security
-boundary; see [Install a release](#install-a-release) and
-[Disclaimer](#disclaimer).
+CloakGPT is an unofficial browser-automation project. It is not affiliated with
+OpenAI, and using it is subject to the terms of the services it automates.
+CloakBrowser is a separately downloaded external binary under its own license and
+trust boundary. Full text: [Legal](docs/legal.md).
 
 ## License
 
 CloakGPT is available under the [MIT License](LICENSE). Third-party components
 and dependencies retain their respective licenses.
 
-## Disclaimer
-
-CloakGPT is an independent, unofficial interoperability project. It is not
-affiliated with, endorsed by, or sponsored by OpenAI or CloakHQ. `OpenAI`,
-`ChatGPT`, and `GPT` are trademarks of OpenAI; `CloakBrowser` is a trademark or
-product name of CloakHQ. These names identify compatible third-party services
-only. Their use does not grant trademark permission or override the applicable
-[OpenAI Brand Guidelines](https://openai.com/brand/), which currently state
-that the `GPT` brand is not permitted in app, product, developer, or company
-names. This notice does not claim a license or exception for this project's
-current name.
-
-CloakGPT controls `chatgpt.com` through a user-owned browser session and reads
-the rendered response; it does not use the official OpenAI API. OpenAI's
-current [Terms of Use](https://openai.com/policies/terms-of-use/) include
-restrictions on automatically or programmatically extracting data or output
-and on bypassing rate limits, restrictions, protective measures, or safety
-mitigations. OpenAI may suspend or terminate access for violations. You are
-solely responsible for determining whether each intended use complies with the
-terms that apply to your account and region, the
-[OpenAI Usage Policies](https://openai.com/policies/usage-policies/), your
-organization's rules, third-party rights, and applicable law. This project does
-not grant permission to access any account, content, or service and does not
-guarantee that browser automation is permitted for a particular use.
-
-The separately downloaded CloakBrowser compiled binary is not covered by
-CloakGPT's MIT License. It is governed by the
-[CloakBrowser Binary License](https://github.com/CloakHQ/CloakBrowser/blob/main/BINARY-LICENSE.md),
-which may impose version-specific subscription requirements and restrictions
-on redistribution, embedding, hosted services, and OEM/SaaS use. You are
-responsible for obtaining any required CloakBrowser entitlement and complying
-with its current terms.
-
-CloakGPT keeps an authenticated browser profile and conversation state in its
-local data directory. Treat that directory as sensitive: restrict access and
-never share, publish, or commit it. Prompts, uploaded content, and responses are
-processed by OpenAI under its
-[Privacy Policy](https://openai.com/policies/privacy-policy/) and account data
-controls. CloakGPT does not make data sent to ChatGPT private from OpenAI or
-from an administrator that controls the ChatGPT account.
-
-AI output can be incomplete, inaccurate, or inappropriate. Review important
-results and do not rely on them as the sole source of truth or as a substitute
-for qualified professional advice. Website interfaces, upstream software,
-provider policies, and detection systems can change without notice, so
-availability, compatibility, account continuity, and uninterrupted operation
-are not guaranteed.
-
-The software is provided **as is**, without warranty, under the MIT License. To
-the maximum extent permitted by law, the authors and copyright holders are not
-liable for account restrictions, service interruption, data loss, security
-incidents, incorrect output, third-party claims, or other damages arising from
-use of the software. This summary is informational and is not legal advice; the
-linked governing terms control if this summary differs from them.
