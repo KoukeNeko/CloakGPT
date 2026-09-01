@@ -1,3 +1,5 @@
+<img width="1774" height="887" alt="image" src="https://github.com/user-attachments/assets/af353f4c-b3f2-4924-ab12-793927f9bbbb" />
+
 # CloakGPT
 
 [![CI](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml)
