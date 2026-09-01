@@ -30,8 +30,8 @@ itself remains an external binary with its own
 
 Installing the recommended agent skill additionally needs Node.js/`npx`, the
 GitHub CLI fallback, or a compatible agent's manual skill-install mechanism.
-Running from source requires Python 3.11, `venv`, and `pip`; building a packaged
-executable also installs the dependencies in `requirements-build.txt`.
+Running from source and building a packaged executable are described in
+[Contributing](../CONTRIBUTING.md).
 
 ## Release options and assets
 
