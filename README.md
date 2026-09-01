@@ -2,9 +2,9 @@
 
 # CloakGPT
 
-[![CI](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/KoukeNeko/CloakGPT)](https://github.com/KoukeNeko/CloakGPT/releases/latest)
-[![License](https://img.shields.io/github/license/KoukeNeko/CloakGPT)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/KoukeNeko/CloakGPT/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/KoukeNeko/CloakGPT/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/KoukeNeko/CloakGPT?style=for-the-badge)](https://github.com/KoukeNeko/CloakGPT/releases/latest)
+[![License](https://img.shields.io/github/license/KoukeNeko/CloakGPT?style=for-the-badge)](LICENSE)
 
 **Use your own ChatGPT browser session from the terminal.**
 
