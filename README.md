@@ -10,31 +10,6 @@ different sessions concurrently in one shared browser, select an available
 model and reasoning level, report ChatGPT's live page status, and return the
 final response with Markdown formatting and citation sources.
 
-## Table of contents
-
-- [Requirements](#requirements)
-- [Install a release](#install-a-release)
-  - [Linux and macOS](#linux-and-macos)
-  - [Windows](#windows)
-- [Install the agent skill (recommended)](#install-the-agent-skill-recommended)
-- [Release options and assets](#release-options-and-assets)
-- [Update CloakGPT](#update-cloakgpt)
-- [Instructions for an agent](#instructions-for-an-agent)
-- [Uninstall](#uninstall)
-- [Login](#login)
-- [Manage the external browser](#manage-the-external-browser)
-- [Ask ChatGPT](#ask-chatgpt)
-  - [Asking without signing in](#asking-without-signing-in)
-- [Persistent agent sessions](#persistent-agent-sessions)
-- [Select a model and reasoning level](#select-a-model-and-reasoning-level)
-- [User data](#user-data)
-- [Security model](#security-model)
-- [Run from source](#run-from-source)
-- [Test and build](#test-and-build)
-  - [macOS release signing](#macos-release-signing)
-- [License](#license)
-- [Disclaimer](#disclaimer)
-
 ## Requirements
 
 For a packaged release:
