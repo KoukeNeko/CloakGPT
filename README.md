@@ -15,6 +15,7 @@ use the OpenAI API** — it operates the account you are already signed in to.
 - Independent sessions running concurrently in one shared browser
 - Model and reasoning-level selection, or leave the page as it is
 - Markdown answers with their citation sources
+- An OpenAI-compatible HTTP API server (`cloakgpt serve`) for Cline, Cursor, and Open WebUI
 - A portable Agent Skill so coding agents can drive it safely
 
 ## Requirements
@@ -109,6 +110,25 @@ Agents should prefer a machine-readable event stream:
 ```sh
 cloakgpt ask "Reply only: OK." --output jsonl
 ```
+
+### OpenAI-compatible API server
+
+Start a local HTTP server compatible with OpenAI clients like **Cline**, **Cursor**, **Open WebUI**, and **LangChain**:
+
+```sh
+cloakgpt serve
+```
+
+Configure your client:
+- **Base URL**: `http://127.0.0.1:8000/v1`
+- **Model ID**: `gpt-5.5` or `gpt-5.6-sol`
+- **API Key**: any non-empty value (or specify `--api-key <secret>` to enforce authentication)
+
+Highlights:
+- **Fast SSE Handshake & Keepalives**: Immediate HTTP 200 response and periodic keepalive comments avoid client connection timeouts (such as Node.js / Cline 10-second header timeouts).
+- **Live Thinking Status Streaming**: Real-time browser status (`Thinking...`, `Searching web...`) streams into Cline's collapsible Thinking UI block (`delta.reasoning_content`).
+- **Smart Session Continuity**: Subsequent questions in the same task reuse the active ChatGPT conversation tab, streaming answers directly without reloading or re-selecting models. Starting a new task in Cline automatically isolates into a fresh session.
+- **LAN Access**: Pass `--host 0.0.0.0 --port 8000` to share with other devices on your local network.
 
 Waiting behavior, the JSONL protocol, concurrency rules, daemon control, and
 browser management are documented in [Usage](docs/usage.md).

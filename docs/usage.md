@@ -273,3 +273,40 @@ Both options default to `None`. Omit an option to keep ChatGPT's current page
 setting. Availability depends on the signed-in account and workspace. If a
 requested option is unavailable, the CLI reports the visible menu instead of
 using a private ChatGPT API.
+
+## OpenAI-compatible API server
+
+Run a local OpenAI-compatible HTTP API server to connect external coding tools
+like Cline, Cursor, Open WebUI, and LangChain to your ChatGPT browser session:
+
+```sh
+cloakgpt serve
+```
+
+### CLI Options
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--host HOST` | `127.0.0.1` | Network interface to bind (use `0.0.0.0` for LAN access) |
+| `--port PORT` | `8000` | Port to listen on |
+| `--api-key KEY` | None | Require Bearer token authentication (`Authorization: Bearer <KEY>`) |
+| `--session ID` | None | Pin all requests to a persistent session ID |
+| `--stateless` | Disabled | Force `send_once` on every request instead of smart session continuity |
+| `--model MODEL` | Default | Override default ChatGPT model (`gpt-5.5`, `gpt-5.6-sol`, etc.) |
+| `--reasoning LEVEL` | Default | Override default reasoning effort (`fast`, `medium`, `high`) |
+| `--headed` | Headless | Display the browser window during automation |
+| `--timezone TZ` | `Asia/Taipei` | IANA timezone for the browser environment |
+
+### Client Configuration (e.g. Cline)
+
+In your tool's OpenAI-compatible settings:
+- **API Provider**: `OpenAI Compatible`
+- **Base URL**: `http://127.0.0.1:8000/v1` (or `http://<LAN-IP>:8000/v1`)
+- **API Key**: any non-empty string (or your `--api-key` value)
+- **Model ID**: `gpt-5.5` or `gpt-5.6-sol`
+
+### Key Capabilities
+
+1. **Anti-Timeout Fast SSE Handshake**: Sends `HTTP 200` and initial role chunk in under 100ms, accompanied by periodic `: keep-alive` comments to prevent Node.js / `undici` client connect timeouts (10s limit).
+2. **Real-time Thinking Streaming**: Browser progress updates (e.g., `ChatGPT activity: 思考中...`, web search) stream as `delta.reasoning_content` chunks into Cline's Thinking dropdown.
+3. **Smart Session Continuity**: Reuses the active ChatGPT tab for follow-up turns in the same task and incrementally inputs only new messages, saving 10-15s per turn. Starting a new task in Cline automatically isolates into a fresh session.
