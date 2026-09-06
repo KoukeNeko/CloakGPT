@@ -338,7 +338,7 @@ class SessionBroker:
                 f"daemon timezone is {self.timezone}; stop it before changing timezone"
             )
 
-        session_id = uuid.uuid4().hex
+        session_id = str(request.get("session_id") or uuid.uuid4().hex)
         status("Creating persistent conversation ID...")
         now = time.time()
         self.sessions[session_id] = {
@@ -354,7 +354,13 @@ class SessionBroker:
     ) -> dict[str, Any]:
         session_id = str(request["session_id"])
         if session_id not in self.sessions:
-            raise ValueError(f"unknown session: {session_id}")
+            now = time.time()
+            self.sessions[session_id] = {
+                "conversation_url": None,
+                "created_at": now,
+                "last_used": now,
+            }
+            self._save_state()
         request_id = self._begin_job(session_id)
         session_lock = self._session_locks.setdefault(session_id, asyncio.Lock())
         try:

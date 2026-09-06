@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from collections.abc import Sequence
 
@@ -35,6 +36,7 @@ from cloakgpt_update import (
     update_cloakgpt,
     version_text,
 )
+from cloakgpt_server import OpenAIServer
 
 
 def _configure_windows_utf8_stdio() -> None:
@@ -302,6 +304,58 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="abandon requests that are still running instead of refusing to stop",
     )
+
+    serve_parser = commands.add_parser(
+        "serve",
+        help="start an OpenAI-compatible HTTP API server",
+    )
+    serve_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="host to bind the HTTP server to (default: 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="port to listen on (default: 8000)",
+    )
+    serve_parser.add_argument(
+        "--api-key",
+        help="optional API key required for requests (Authorization: Bearer <key>)",
+    )
+    serve_parser.add_argument(
+        "--session",
+        help="persistent session ID for requests (or set CLOAKGPT_SESSION_ID)",
+    )
+    serve_parser.add_argument(
+        "--timezone",
+        default="Asia/Taipei",
+        help="user's IANA timezone (default: Asia/Taipei)",
+    )
+    serve_parser.add_argument(
+        "--model",
+        type=ChatGPTModel,
+        choices=list(ChatGPTModel),
+        help="default model override",
+    )
+    serve_parser.add_argument(
+        "--reasoning",
+        type=ReasoningLevel,
+        choices=list(ReasoningLevel),
+        help="reasoning level override",
+    )
+    serve_parser.add_argument(
+        "--headed",
+        action="store_false",
+        dest="headless",
+        help="show the browser window (default: run headless)",
+    )
+    serve_parser.add_argument(
+        "--stateless",
+        action="store_true",
+        help="disable session continuity and open a new temporary conversation on every request",
+    )
     return parser
 
 
@@ -324,6 +378,54 @@ def _run_hidden_playwright_check() -> int:
         stdin=subprocess.DEVNULL,
         check=True,
     )
+    return 0
+
+
+def _run_serve_command(args) -> int:
+    session_id = args.session or os.environ.get("CLOAKGPT_SESSION_ID")
+    server = OpenAIServer(
+        host=args.host,
+        port=args.port,
+        api_key=args.api_key,
+        session_id=session_id,
+        stateless=args.stateless,
+        default_model=str(args.model) if args.model is not None else None,
+        reasoning=args.reasoning,
+        headless=args.headless,
+        timezone=args.timezone,
+        verbose=True,
+    )
+    server.start()
+    mode = "headless" if args.headless else "headed"
+    print(
+        f"[server] CloakGPT OpenAI-compatible API server running at http://{args.host}:{server.port}/v1",
+        file=sys.stderr,
+    )
+    print(
+        f"[server] Endpoints: /v1/models, /v1/chat/completions (Browser: {mode})",
+        file=sys.stderr,
+    )
+    if args.stateless:
+        print("[server] Session mode: stateless (send_once on every turn)", file=sys.stderr)
+    elif session_id:
+        print(f"[server] Session mode: pinned ({session_id})", file=sys.stderr)
+    else:
+        print(
+            f"[server] Session mode: smart continuous session (active: {server.session_manager.active_session_id})",
+            file=sys.stderr,
+        )
+    if args.api_key:
+        print("[server] Authentication: Bearer token required", file=sys.stderr)
+    print("[server] Press Ctrl+C to stop.", file=sys.stderr)
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[server] Shutting down server...", file=sys.stderr)
+    finally:
+        server.shutdown()
+        print("[server] Server stopped.", file=sys.stderr)
     return 0
 
 
@@ -520,6 +622,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if args.command == "update":
             return _run_update_command(args)
+        if args.command == "serve":
+            return _run_serve_command(args)
 
         status_callback = _status_callback(args.output_format)
 

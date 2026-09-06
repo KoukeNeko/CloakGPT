@@ -72,7 +72,6 @@ class StringEnum(str, Enum):
 class ChatGPTModel(StringEnum):
     GPT_5_6_SOL = "gpt-5.6-sol"
     GPT_5_5 = "gpt-5.5"
-    O3 = "o3"
 
 
 class ReasoningLevel(StringEnum):
@@ -88,7 +87,6 @@ class ProfileInUseError(RuntimeError):
 MODEL_LABELS = {
     ChatGPTModel.GPT_5_6_SOL: "GPT-5.6 Sol",
     ChatGPTModel.GPT_5_5: "GPT-5.5",
-    ChatGPTModel.O3: "o3",
 }
 
 REASONING_LEVEL_INDEXES = {
@@ -110,7 +108,7 @@ def get_default_data_dir() -> Path:
     custom_dir = os.environ.get("CLOAKGPT_DATA_DIR")
     if custom_dir:
         return Path(custom_dir).expanduser()
-    if not getattr(sys, "frozen", False):
+    if not getattr(sys, "frozen", False) and (SOURCE_DIR / "chatgpt-profile").exists():
         return SOURCE_DIR
 
     system = platform.system()
@@ -896,7 +894,10 @@ async def _set_model(page, model: ChatGPTModel) -> None:
         if await option.get_attribute("aria-checked") == "true":
             await _close_advanced_menus(page)
             return
-        await option.click()
+        try:
+            await option.click()
+        except Exception:
+            await option.click(force=True)
         return
 
     submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
@@ -915,7 +916,10 @@ async def _set_model(page, model: ChatGPTModel) -> None:
     if await option.get_attribute("aria-checked") == "true":
         await _close_advanced_menus(page)
         return
-    await option.click()
+    try:
+        await option.click()
+    except Exception:
+        await option.click(force=True)
 
 
 async def _set_reasoning_level(page, reasoning_level: ReasoningLevel) -> None:

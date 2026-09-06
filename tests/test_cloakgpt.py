@@ -623,6 +623,35 @@ class CloakGPTCliTests(unittest.TestCase):
             "stopped",
         )
 
+    @patch("cloakgpt.OpenAIServer")
+    def test_serve_command_starts_and_stops_server(self, mock_server_cls) -> None:
+        mock_server = Mock()
+        mock_server.port = 8888
+        mock_server_cls.return_value = mock_server
+
+        with patch("time.sleep", side_effect=KeyboardInterrupt):
+            errors = io.StringIO()
+            with redirect_stderr(errors):
+                result = cloakgpt.main(["serve", "--port", "8888", "--api-key", "test-key"])
+
+        self.assertEqual(result, 0)
+        mock_server_cls.assert_called_once_with(
+            host="127.0.0.1",
+            port=8888,
+            api_key="test-key",
+            session_id=None,
+            stateless=False,
+            default_model=None,
+            reasoning=None,
+            headless=True,
+            timezone="Asia/Taipei",
+            verbose=True,
+        )
+        mock_server.start.assert_called_once()
+        mock_server.shutdown.assert_called_once()
+        self.assertIn("server running at http://127.0.0.1:8888/v1", errors.getvalue())
+        self.assertIn("Server stopped.", errors.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
