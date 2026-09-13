@@ -137,8 +137,9 @@ cloakgpt ask "Reply only: OK."
 
 `ask` starts a new conversation. It runs headless by default, sends the message,
 and puts no limit on how long a response may take, because generation time
-depends on the model and prompt. Completion is detected from ChatGPT's active
-generation and assistant-turn state; press Ctrl+C to stop manually. Stopping
+depends on the model and prompt. Completion is detected from ChatGPT's
+assistant-turn state: the turn must stop generating and show its copy control;
+press Ctrl+C to stop manually. Stopping
 disconnects the client, and the daemon cancels the request it was waiting on and
 closes that browser page rather than finishing work nobody is reading. The
 message may already have reached ChatGPT, so check the conversation before
@@ -149,8 +150,20 @@ restarts a 15-minute stall window, so a long generation is never interrupted,
 while a page that goes completely inert reports an unknown delivery state and
 releases its browser page instead of pinning the daemon's browser open. Set
 `CLOAKGPT_RESPONSE_STALL_SECONDS` to another number of seconds, or to `0` to
-wait indefinitely. Use `--headed` when you want to observe or debug the browser
-window:
+wait indefinitely.
+
+ChatGPT sometimes loses a long reply, most often one that searches the web for
+many minutes. Its page then shows a notice where the answer should be, such as
+`接続が中断されました。回答の完了を待っています`, or
+`メッセージ配信がタイムアウトしました。もう一度お試しください。` beside a retry
+button. While ChatGPT still shows its stop button next to such a notice, it is
+retrying on its own and CloakGPT keeps waiting. Once ChatGPT stops retrying,
+CloakGPT reports an error that quotes the notice and names the conversation,
+instead of returning the notice as the answer. The prompt already reached
+ChatGPT, so check that conversation before resending. If a long research prompt
+keeps failing this way, ask smaller questions.
+
+Use `--headed` when you want to observe or debug the browser window:
 
 ```sh
 cloakgpt ask "Reply only: OK." --headed

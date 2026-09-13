@@ -62,6 +62,17 @@ KEEPALIVE_SCROLL_MAX_DISTANCE = 360
 KEEPALIVE_SCROLL_MIN_RETURN_DELAY_SECONDS = 0.2
 KEEPALIVE_SCROLL_MAX_RETURN_DELAY_SECONDS = 0.7
 KEEPALIVE_SCROLL_SKIP_CHANCE = 0.4
+REPLY_POLL_INTERVAL_MS = 250
+REPLY_NOTICE_SETTLE_SECONDS = 5
+# ChatGPT's own notices that take an answer's place when a reply is lost: its
+# ja-JP catalog strings first, then the error texts it ships untranslated.
+REPLY_NOTICE_MARKERS = (
+    "接続が中断されました",
+    "メッセージ配信がタイムアウトしました",
+    "エラーが大量に発生しました",
+    "A network error occurred",
+    "Something went wrong",
+)
 
 
 class StringEnum(str, Enum):
@@ -328,13 +339,14 @@ TURN_ID_SCRIPT = """response => response
   .closest('section[data-turn="assistant"]')
   ?.getAttribute('data-testid') || null"""
 
-RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId}) => {
+RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId, noticeMarkers}) => {
   const messages = document.querySelectorAll(
     '[data-message-author-role="assistant"]'
   );
   const response = messages[messages.length - 1];
   const turn = [...document.querySelectorAll('section[data-turn="assistant"]')]
-    .find(element => element.getAttribute('data-testid') === turnId);
+    .find(element => element.getAttribute('data-testid') === turnId)
+    || response?.closest('section[data-turn="assistant"]');
   const visible = element => !!(element && (
     element.offsetWidth
     || element.offsetHeight
@@ -344,6 +356,26 @@ RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId}) => {
     '[data-testid="stop-button"]'
   )].some(visible);
   const messageId = response?.getAttribute('data-message-id') || '';
+  const generating = stopButtonVisible
+    || messageId.startsWith('request-placeholder-')
+    || !!response?.querySelector('[aria-busy="true"], .streaming-animation');
+  // A lost reply is rendered as a notice inside the message but outside the
+  // answer body, and gains a retry button once ChatGPT stops retrying itself.
+  const markedNotice = [...(turn?.querySelectorAll(
+    '[data-message-author-role="assistant"] .markdown'
+  ) || [])]
+    .filter(element => !element.closest('.prose'))
+    .map(element => (element.innerText || '').trim())
+    .filter(text => noticeMarkers.some(marker => text.includes(marker)))
+    .pop();
+  const retryButton = turn?.querySelector(
+    '[data-testid="regenerate-thread-error-button"]'
+  );
+  const retryNotice = retryButton && (
+    (retryButton.parentElement?.querySelector('.markdown')?.innerText || '').trim()
+    || (retryButton.innerText || '').trim()
+  );
+  const notice = markedNotice || retryNotice || null;
   const statusButton = [...(turn?.querySelectorAll('button') || [])]
     .filter(visible)
     .find(button => {
@@ -354,18 +386,30 @@ RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId}) => {
     });
   return {
     progress: (response?.innerText || '').length,
+    generating,
+    notice,
+    // Only a finished turn gets its copy control, so an answer is complete
+    // when that appears rather than merely when the busy signals are gone.
     complete: messages.length > previousCount
       && !!response?.innerText.trim()
-      && !messageId.startsWith('request-placeholder-')
-      && !response.querySelector('[aria-busy="true"]')
-      && !response.querySelector('.streaming-animation')
-      && !stopButtonVisible,
+      && !generating
+      && !notice
+      && !!turn?.querySelector('[data-testid="copy-turn-action-button"]'),
     status: statusButton
       ? ((statusButton.innerText || '').trim()
         || statusButton.getAttribute('aria-label'))
       : null
   };
 }"""
+
+
+def reply_state_argument(previous_count: int, turn_id: str | None) -> dict:
+    """Build the argument every reply state script receives on each poll."""
+    return {
+        "previousCount": previous_count,
+        "turnId": turn_id,
+        "noticeMarkers": list(REPLY_NOTICE_MARKERS),
+    }
 
 
 STANDARD_FIRST_RESPONSE_SCRIPT = """([selector, previousCount]) =>
@@ -665,6 +709,14 @@ class ResponseStalledError(Exception):
     """ChatGPT showed no progress for the whole stall window."""
 
 
+class ReplyNoticeError(Exception):
+    """ChatGPT left one of its own notices where the answer should be."""
+
+    def __init__(self, notice: str) -> None:
+        super().__init__(notice)
+        self.notice = notice
+
+
 def _raise_if_stalled(progressed_at: float, stall_seconds: float | None) -> None:
     if stall_seconds is None:
         return
@@ -707,6 +759,69 @@ async def _wait_for_first_response(
         raise ResponseStalledError(_stall_message(stall_seconds)) from error
 
 
+class _ReplyMonitor:
+    """Follow polled reply states until ChatGPT finishes, fails, or stalls."""
+
+    def __init__(
+        self,
+        status_callback: StatusCallback | None,
+        stall_seconds: float | None,
+    ) -> None:
+        self._status_callback = status_callback
+        self._stall_seconds = stall_seconds
+        self._announced_status: str | None = None
+        self._announced_notice: str | None = None
+        self._last_progress: tuple | None = None
+        self._progressed_at = time.monotonic()
+        self._notice_since: float | None = None
+
+    def observe(self, state: dict) -> bool:
+        """Return whether the reply is complete; raise once it failed or stalled."""
+        # Labels blink off between phases, so remembering only what was
+        # announced keeps one activity or notice from being reported twice.
+        self._announced_status = self._announce_if_new(
+            "ChatGPT activity", state.get("status"), self._announced_status
+        )
+        self._announced_notice = self._announce_if_new(
+            "ChatGPT notice", state.get("notice"), self._announced_notice
+        )
+        self._record_progress(state)
+        if state["complete"]:
+            return True
+        self._raise_if_notice_settled(state)
+        _raise_if_stalled(self._progressed_at, self._stall_seconds)
+        return False
+
+    def _announce_if_new(
+        self, label: str, value: str | None, announced: str | None
+    ) -> str | None:
+        if not value or value == announced:
+            return announced
+        _emit_status(self._status_callback, f"{label}: {value}")
+        return value
+
+    def _record_progress(self, state: dict) -> None:
+        # Growing text, a changed activity label, or a new notice all mean the
+        # page is still moving, so only a completely inert page runs the stall
+        # window down.
+        progress = (state.get("status"), state.get("progress"), state.get("notice"))
+        if progress != self._last_progress:
+            self._last_progress = progress
+            self._progressed_at = time.monotonic()
+
+    def _raise_if_notice_settled(self, state: dict) -> None:
+        notice = state.get("notice")
+        # A notice shown beside the stop button means ChatGPT is still retrying
+        # on its own; it only stands for a failure once that has stopped.
+        if not notice or state.get("generating"):
+            self._notice_since = None
+            return
+        if self._notice_since is None:
+            self._notice_since = time.monotonic()
+        if time.monotonic() - self._notice_since >= REPLY_NOTICE_SETTLE_SECONDS:
+            raise ReplyNoticeError(notice)
+
+
 async def _wait_for_reply(
     page,
     previous_count: int,
@@ -722,30 +837,12 @@ async def _wait_for_reply(
         _emit_status(status_callback, "ChatGPT is responding...")
         response = page.locator(surface.assistant_selector).last
         turn_id = await response.evaluate(TURN_ID_SCRIPT)
-        previous_status = None
-        previous_progress = None
-        progressed_at = time.monotonic()
-        while True:
-            state = await page.evaluate(
-                surface.state_script,
-                {"previousCount": previous_count, "turnId": turn_id},
-            )
-            current_status = state["status"]
-            if current_status and current_status != previous_status:
-                _emit_status(status_callback, f"ChatGPT activity: {current_status}")
-                # The label blinks off between phases, so remembering only what
-                # was announced keeps one activity from being reported twice.
-                previous_status = current_status
-            # Growing text or a changed activity label both mean ChatGPT is still
-            # working, so only a completely inert page runs the stall window down.
-            current_progress = (current_status, state.get("progress"))
-            if current_progress != previous_progress:
-                previous_progress = current_progress
-                progressed_at = time.monotonic()
-            if state["complete"]:
-                break
-            _raise_if_stalled(progressed_at, stall_seconds)
-            await page.wait_for_timeout(250)
+        monitor = _ReplyMonitor(status_callback, stall_seconds)
+        state_argument = reply_state_argument(previous_count, turn_id)
+        while not monitor.observe(
+            await page.evaluate(surface.state_script, state_argument)
+        ):
+            await page.wait_for_timeout(REPLY_POLL_INTERVAL_MS)
     finally:
         keepalive_task.cancel()
         try:
@@ -1029,6 +1126,44 @@ def _signed_out_status(
 class DeliveryStateUnknownError(RuntimeError):
     """The prompt was clicked, but completion could not be confirmed."""
 
+    def __init__(self, message: str, conversation_url: str | None = None) -> None:
+        super().__init__(message)
+        self.conversation_url = conversation_url
+
+
+class ReplyFailedError(DeliveryStateUnknownError):
+    """ChatGPT showed its own error notice where the answer should be."""
+
+
+UNKNOWN_DELIVERY_MESSAGE = (
+    "delivery state unknown; the prompt was sent but completion could not be confirmed"
+)
+
+
+def _conversation_url_or_none(url: str) -> str | None:
+    try:
+        _validate_conversation_url(url)
+    except ValueError:
+        return None
+    return url
+
+
+def _unknown_delivery(
+    error_type: type[DeliveryStateUnknownError], message: str, page_url: str
+) -> DeliveryStateUnknownError:
+    """Name the conversation the prompt reached, so it can be checked later."""
+    conversation_url = _conversation_url_or_none(page_url)
+    if conversation_url is not None:
+        message = f"{message}; conversation: {conversation_url}"
+    return error_type(message, conversation_url)
+
+
+def _reply_notice_message(notice: str) -> str:
+    return (
+        f'ChatGPT showed its own notice instead of an answer: "{notice}"; the '
+        "prompt was sent, so check the conversation before resending it"
+    )
+
 
 async def send_message_on_page(
     page,
@@ -1091,10 +1226,16 @@ async def send_message_on_page(
         _emit_status(status_callback, "Response complete.")
         return answer, page.url
     except ResponseStalledError as error:
-        raise DeliveryStateUnknownError(str(error)) from error
+        raise _unknown_delivery(
+            DeliveryStateUnknownError, str(error), page.url
+        ) from error
+    except ReplyNoticeError as error:
+        raise _unknown_delivery(
+            ReplyFailedError, _reply_notice_message(error.notice), page.url
+        ) from error
     except Exception as error:
-        raise DeliveryStateUnknownError(
-            "delivery state unknown; the prompt was sent but completion could not be confirmed"
+        raise _unknown_delivery(
+            DeliveryStateUnknownError, UNKNOWN_DELIVERY_MESSAGE, page.url
         ) from error
 
 

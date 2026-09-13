@@ -314,6 +314,129 @@ class ChatGPTBrowserTests(unittest.TestCase):
             )
 
         self.assertIn("no progress", str(caught.exception))
+        self.assertEqual(caught.exception.conversation_url, self.page.url)
+        self.assertIn(self.page.url, str(caught.exception))
+
+    def test_unknown_delivery_without_a_conversation_names_none(self) -> None:
+        self.page.url = chatgpt_browser.CHATGPT_URL
+        inert = [{"complete": False, "status": "思考中", "progress": 42}] * 3
+
+        with self.assertRaises(chatgpt_browser.DeliveryStateUnknownError) as caught:
+            self._run_send_with_states(
+                inert,
+                seconds_per_poll=600,
+                stall_seconds=60,
+            )
+
+        self.assertIsNone(caught.exception.conversation_url)
+        self.assertNotIn("conversation:", str(caught.exception))
+
+    def test_chatgpt_error_notice_fails_the_reply_instead_of_answering(self) -> None:
+        notice = "メッセージ配信がタイムアウトしました。もう一度お試しください。"
+        failed = [
+            {
+                "complete": False,
+                "generating": False,
+                "notice": notice,
+                "status": None,
+                "progress": 36,
+            }
+        ] * 3
+
+        with self.assertRaises(chatgpt_browser.ReplyFailedError) as caught:
+            self._run_send_with_states(
+                failed,
+                seconds_per_poll=3,
+                stall_seconds=900,
+            )
+
+        self.assertIsInstance(
+            caught.exception, chatgpt_browser.DeliveryStateUnknownError
+        )
+        self.assertIn(notice, str(caught.exception))
+        self.assertEqual(caught.exception.conversation_url, self.page.url)
+        extracted_scripts = [
+            call.args[0] for call in self.responses.last.evaluate.await_args_list
+        ]
+        self.assertNotIn(chatgpt_browser.RENDER_MARKDOWN_SCRIPT, extracted_scripts)
+
+    def test_notice_while_chatgpt_still_retries_keeps_waiting(self) -> None:
+        retrying = [
+            {
+                "complete": False,
+                "generating": True,
+                "notice": "接続が中断されました。回答の完了を待っています",
+                "status": None,
+                "progress": 3,
+            }
+        ] * 3
+        finished = [
+            {"complete": True, "generating": False, "notice": None, "status": None}
+        ]
+
+        answer, _url = self._run_send_with_states(
+            retrying + finished,
+            seconds_per_poll=60,
+            stall_seconds=900,
+        )
+
+        self.assertEqual(answer, "OK.")
+
+    def test_notice_that_clears_quickly_does_not_fail_the_reply(self) -> None:
+        flicker = [
+            {
+                "complete": False,
+                "generating": False,
+                "notice": "接続が中断されました。回答の完了を待っています",
+                "status": None,
+                "progress": 23,
+            }
+        ]
+        finished = [
+            {"complete": True, "generating": False, "notice": None, "status": None}
+        ]
+
+        answer, _url = self._run_send_with_states(
+            flicker + finished,
+            seconds_per_poll=1,
+            stall_seconds=900,
+        )
+
+        self.assertEqual(answer, "OK.")
+
+    def test_notice_settle_restarts_when_chatgpt_resumes_generating(self) -> None:
+        notice = "接続が中断されました。回答の完了を待っています"
+        idle_notice = {
+            "complete": False,
+            "generating": False,
+            "notice": notice,
+            "status": None,
+            "progress": 23,
+        }
+        retrying = {**idle_notice, "generating": True}
+        finished = {"complete": True, "generating": False, "notice": None, "status": None}
+
+        answer, _url = self._run_send_with_states(
+            [idle_notice, retrying, idle_notice, finished],
+            seconds_per_poll=3,
+            stall_seconds=900,
+        )
+
+        self.assertEqual(answer, "OK.")
+
+    def test_state_script_requires_completion_controls_and_reads_notices(self) -> None:
+        script = chatgpt_browser.RESPONSE_STATE_SCRIPT
+        self.assertIn('data-testid="copy-turn-action-button"', script)
+        self.assertIn('data-testid="regenerate-thread-error-button"', script)
+        self.assertIn("!element.closest('.prose')", script)
+
+        argument = chatgpt_browser.reply_state_argument(
+            previous_count=2, turn_id="conversation-turn-4"
+        )
+
+        self.assertEqual(argument["previousCount"], 2)
+        self.assertEqual(argument["turnId"], "conversation-turn-4")
+        self.assertIn("メッセージ配信がタイムアウトしました", argument["noticeMarkers"])
 
     def test_missing_first_response_reports_unknown_delivery(self) -> None:
         self.page.wait_for_function = AsyncMock(
@@ -1039,6 +1162,28 @@ class ChatGPTBrowserTests(unittest.TestCase):
         status_callback.assert_any_call("ChatGPT activity: 2件のサイトを検索中")
         status_callback.assert_any_call("ChatGPT activity: 13s考えました")
         self.assertEqual(self.page.wait_for_timeout.call_count, 3)
+
+    def test_reports_chatgpt_notices_as_status(self) -> None:
+        status_callback = Mock()
+        notice = "接続が中断されました。回答の完了を待っています"
+        self.page.evaluate.side_effect = [
+            {"complete": False, "generating": True, "notice": notice, "status": None},
+            {"complete": False, "generating": True, "notice": notice, "status": None},
+            {"complete": True, "generating": False, "notice": None, "status": None},
+        ]
+
+        chatgpt_browser.start_conversation(
+            "Search",
+            status_callback=status_callback,
+            profile_dir=self.profile_dir,
+        )
+
+        notice_calls = [
+            call
+            for call in status_callback.call_args_list
+            if call.args[0] == f"ChatGPT notice: {notice}"
+        ]
+        self.assertEqual(len(notice_calls), 1)
 
     def test_composer_lock_does_not_serialize_response_generation(self) -> None:
         async def exercise() -> None:
