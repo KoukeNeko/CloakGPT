@@ -66,7 +66,6 @@ Supported model values are:
 
 - `gpt-5.6-sol`
 - `gpt-5.5`
-- `o3`
 
 Supported reasoning values are:
 
