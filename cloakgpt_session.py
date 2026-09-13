@@ -15,7 +15,7 @@ import time
 import uuid
 from multiprocessing.connection import Client, Listener
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from chatgpt_browser import (
     CHATGPT_URL,
@@ -393,25 +393,47 @@ class SessionBroker:
                         allow_signed_out=False,
                     )
 
-                page = await self._new_page(request_id)
                 try:
-                    answer, current_url = await deliver(page)
-                except (DeliveryStateUnknownError, SignedOutError):
-                    # Restarting the page cannot sign anyone in.
+                    answer, current_url = await self._deliver_with_one_restart(
+                        request_id, deliver, status
+                    )
+                except DeliveryStateUnknownError as error:
+                    # The prompt reached that conversation even though no answer
+                    # came back, so the session's next turn has to continue there.
+                    if error.conversation_url is not None:
+                        self._record_conversation(record, error.conversation_url)
                     raise
-                except Exception:
-                    status("Browser page failed before delivery; restarting it once...")
-                    await self._close_page(request_id)
-                    page = await self._new_page(request_id)
-                    answer, current_url = await deliver(page)
 
                 _validate_conversation_url(current_url)
-                record["conversation_url"] = current_url
-                record["last_used"] = time.time()
-                self._save_state()
+                self._record_conversation(record, current_url)
         finally:
             await self._finish_job(request_id, status)
         return {"answer": answer, **self.session_status(session_id)}
+
+    async def _deliver_with_one_restart(
+        self,
+        request_id: str,
+        deliver: Callable[[Any], Awaitable[tuple[str, str]]],
+        status: StatusCallback,
+    ) -> tuple[str, str]:
+        page = await self._new_page(request_id)
+        try:
+            return await deliver(page)
+        except (DeliveryStateUnknownError, SignedOutError):
+            # Restarting the page cannot sign anyone in.
+            raise
+        except Exception:
+            status("Browser page failed before delivery; restarting it once...")
+            await self._close_page(request_id)
+            page = await self._new_page(request_id)
+            return await deliver(page)
+
+    def _record_conversation(
+        self, record: dict[str, Any], conversation_url: str
+    ) -> None:
+        record["conversation_url"] = conversation_url
+        record["last_used"] = time.time()
+        self._save_state()
 
     async def send_once(
         self, request: dict[str, Any], status: StatusCallback

@@ -264,6 +264,97 @@ class SessionBrokerTests(unittest.IsolatedAsyncioTestCase):
         self.page.close.assert_awaited_once_with()
         self.context.close.assert_awaited_once_with()
 
+    @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
+    async def test_failed_reply_keeps_its_conversation_for_the_next_turn(
+        self, send
+    ) -> None:
+        session_id = self.open_session()["session_id"]
+        send.side_effect = cloakgpt_session.DeliveryStateUnknownError(
+            "ChatGPT replaced its answer with a notice",
+            "https://chatgpt.com/c/interrupted",
+        )
+
+        with self.assertRaises(cloakgpt_session.DeliveryStateUnknownError):
+            await self.broker.send(
+                {
+                    "session_id": session_id,
+                    "question": "Hello",
+                    "model": None,
+                    "reasoning": None,
+                },
+                Mock(),
+            )
+
+        restored = cloakgpt_session.SessionBroker(
+            data_dir=self.data_dir,
+            headless=True,
+            timezone="Asia/Taipei",
+        )
+        self.assertEqual(
+            restored.session_status(session_id)["conversation_url"],
+            "https://chatgpt.com/c/interrupted",
+        )
+        send.assert_awaited_once()
+
+    @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
+    async def test_failed_reply_after_a_page_restart_keeps_its_conversation(
+        self, send
+    ) -> None:
+        session_id = self.open_session()["session_id"]
+        self.context.new_page.side_effect = [self.page, async_page()]
+        send.side_effect = [
+            RuntimeError("page disconnected before click"),
+            cloakgpt_session.DeliveryStateUnknownError(
+                "ChatGPT replaced its answer with a notice",
+                "https://chatgpt.com/c/after-restart",
+            ),
+        ]
+
+        with self.assertRaises(cloakgpt_session.DeliveryStateUnknownError):
+            await self.broker.send(
+                {
+                    "session_id": session_id,
+                    "question": "Hello",
+                    "model": None,
+                    "reasoning": None,
+                },
+                Mock(),
+            )
+
+        self.assertEqual(send.await_count, 2)
+        self.assertEqual(
+            self.broker.session_status(session_id)["conversation_url"],
+            "https://chatgpt.com/c/after-restart",
+        )
+
+    @patch("cloakgpt_session.send_message_on_page", new_callable=AsyncMock)
+    async def test_failed_reply_without_a_conversation_keeps_the_saved_url(
+        self, send
+    ) -> None:
+        session_id = self.open_session()["session_id"]
+        self.broker.sessions[session_id]["conversation_url"] = (
+            "https://chatgpt.com/c/earlier"
+        )
+        send.side_effect = cloakgpt_session.DeliveryStateUnknownError(
+            "delivery state unknown"
+        )
+
+        with self.assertRaises(cloakgpt_session.DeliveryStateUnknownError):
+            await self.broker.send(
+                {
+                    "session_id": session_id,
+                    "question": "Hello",
+                    "model": None,
+                    "reasoning": None,
+                },
+                Mock(),
+            )
+
+        self.assertEqual(
+            self.broker.session_status(session_id)["conversation_url"],
+            "https://chatgpt.com/c/earlier",
+        )
+
     async def test_rejects_mode_and_timezone_changes(self) -> None:
         with self.assertRaisesRegex(ValueError, "headless mode"):
             self.broker.open_session(

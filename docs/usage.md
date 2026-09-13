@@ -298,9 +298,12 @@ request or stop the daemon; stopping preserves session IDs and conversation
 URLs.
 
 Browser failures before delivery are retried once on a reconstructed page.
-Failures after the send click report `delivery state unknown` and are never
-automatically resent. The request's page is closed in both success and error
-paths without closing pages owned by other active sessions.
+Failures after the send click report `delivery state unknown`, or quote the
+notice ChatGPT showed instead of an answer, and are never automatically resent.
+Once ChatGPT has created the conversation, such a failure still saves its URL and
+names it in the error, so the session's next message continues that
+conversation. The request's page is closed in both success and error paths
+without closing pages owned by other active sessions.
 
 Status is printed to stderr while only the final response is printed to stdout,
 so responses can be redirected or piped without status lines:

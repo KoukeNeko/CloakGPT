@@ -128,6 +128,11 @@ cloakgpt ask "What is the weather today?" --timezone Asia/Taipei
   those links and do not invent, rewrite, or remove citations.
 - Report a nonzero exit and its concise error instead of presenting partial
   output as a completed ChatGPT answer.
+- An error saying ChatGPT showed its own notice instead of an answer means the
+  prompt reached ChatGPT but its reply was lost. Do not resend the same prompt
+  or reply "continue" in a loop. Report the notice and the named conversation
+  to the user. If they want to retry a long research prompt, prefer smaller
+  questions. A persistent session keeps that conversation for its next turn.
 
 ## Recover from setup and session failures
 
