@@ -161,7 +161,7 @@ def tigervnc_commands(
         [
             "websockify",
             "--web",
-            str(NOVNC_WEB_DIR),
+            NOVNC_WEB_DIR.as_posix(),
             f"{LOOPBACK}:{port}",
             f"{LOOPBACK}:{rfb_port}",
         ],
@@ -194,7 +194,7 @@ def kasmvnc_commands(
             "-depth",
             "24",
             "-httpd",
-            str(KASMVNC_WEB_DIR),
+            KASMVNC_WEB_DIR.as_posix(),
         ],
     ]
 
