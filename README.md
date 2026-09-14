@@ -27,8 +27,9 @@ use the OpenAI API** — it operates the account you are already signed in to.
 
 A ChatGPT account is recommended rather than required. A one-shot `ask` works on
 a signed-out profile; persistent sessions and choosing a model or reasoning
-level need an account. Signing in is a one-time visible `cloakgpt login`, so
-that step needs a graphical desktop.
+level need an account. Signing in is a one-time visible `cloakgpt login`. It
+needs a graphical desktop, or, on a headless Linux server, a VNC web viewer you
+reach over SSH ([Remote login](docs/usage.md#remote-login-on-a-headless-server)).
 
 Python, `pip`, Node.js, and Git are **not** needed to run a packaged release.
 Full details, including network and installer tooling, are in
@@ -75,8 +76,9 @@ Windows text I/O is set to UTF-8 even when the terminal initially uses Big5
 
 ## Use it
 
-Sign in once, in a visible browser window. Skip this if you only want one-shot
-questions on a signed-out profile:
+Sign in once, in a visible browser window. On a Linux server without a desktop,
+the same command serves that window through an SSH-tunneled web viewer. Skip this
+if you only want one-shot questions on a signed-out profile:
 
 ```sh
 cloakgpt login

@@ -148,14 +148,24 @@ def launch_chatgpt_context(
     *,
     headless: bool,
     timezone: str,
+    env: dict[str, str] | None = None,
+    args: list[str] | None = None,
 ):
     """Launch CloakGPT's profile and replace Chromium's noisy lock error."""
+    # Only a remote login supplies these, so other launches keep CloakBrowser's
+    # own defaults exactly.
+    extra = {}
+    if env is not None:
+        extra["env"] = env
+    if args is not None:
+        extra["args"] = args
     try:
         return launch_persistent_context(
             str(profile_dir),
             headless=headless,
             locale="ja-JP",
             timezone=timezone,
+            **extra,
         )
     except Exception as error:
         message = str(error)
@@ -987,6 +997,13 @@ async def _is_signed_out(page) -> bool:
     except PlaywrightTimeoutError:
         return True
     return False
+
+
+def page_is_signed_in(page) -> bool:
+    """Signed in means ChatGPT's model control is showing, as `_is_signed_out` reads it."""
+    if not page.url.startswith(CHATGPT_URL):
+        return False
+    return page.locator(REASONING_TRIGGER_SELECTOR).first.is_visible()
 
 
 def _signed_out_status(

@@ -6,18 +6,83 @@ page settings. The README shows the short version of each.
 
 ## Login
 
-Open the persistent browser profile, sign in to your own ChatGPT account, then
-return to the terminal and press Enter:
+Open the persistent browser profile and sign in to your own ChatGPT account:
 
 ```sh
 cloakgpt login
 ```
+
+CloakGPT saves the session and closes the browser once the sign-in completes.
+You can also press Enter in the terminal to finish earlier, or close the browser
+window. If the profile is already signed in, for example when you open it to
+switch accounts, the browser stays open until you press Enter.
 
 The default user timezone is `Asia/Taipei`. Override it with an IANA timezone:
 
 ```sh
 cloakgpt login --timezone America/New_York
 ```
+
+### Remote login on a headless server
+
+On Linux without a desktop (no `DISPLAY` or `WAYLAND_DISPLAY`), such as Ubuntu
+Server or an LXC container, `login` runs the browser in a temporary virtual
+display. You reach that display through a web viewer on your own computer. Only
+the login uses it: afterwards `ask`, sessions, and `serve` run headless as usual
+and use the same profile.
+
+Install one VNC backend on the server first. TigerVNC with noVNC comes from the
+distribution's packages:
+
+```sh
+sudo apt install tigervnc-standalone-server novnc websockify
+```
+
+KasmVNC also works; install its package from the
+[KasmVNC releases](https://github.com/kasmtech/KasmVNC/releases). When both are
+installed, TigerVNC is used unless you pass `--vnc kasmvnc`.
+
+Run `login` on the server. It prints an SSH tunnel command and a viewer address:
+
+```text
+$ cloakgpt login
+Remote ChatGPT login is ready (tigervnc, display :100).
+
+On your own computer, open an SSH tunnel:
+  ssh -N -L 6100:127.0.0.1:6100 root@192.168.50.250
+Then open this address in your browser:
+  http://127.0.0.1:6100/vnc.html?autoconnect=1&resize=remote
+```
+
+Run the tunnel command on your own computer, open the address, and sign in inside
+the browser you see there. The viewer listens only on the server's `127.0.0.1`,
+so the SSH tunnel is the only way to reach it. The virtual display and viewer stop
+when login finishes, when you press Ctrl+C, or when the SSH session drops.
+
+To have every SSH connection open the tunnel, add a `LocalForward` to
+`~/.ssh/config` on your computer:
+
+```sshconfig
+Host cloakgpt
+    HostName 192.168.50.250
+    User root
+    LocalForward 6100 127.0.0.1:6100
+```
+
+VS Code Remote-SSH users can instead forward the port from the **Ports** panel.
+
+| Option | Effect |
+| --- | --- |
+| `--remote` | Use the web viewer even when a desktop is detected. |
+| `--local` | Always open a window on this machine's desktop. |
+| `--vnc auto\|tigervnc\|kasmvnc` | Choose the VNC backend (default `auto`). |
+| `--port N` | Use this viewer port on `127.0.0.1` instead of the first free port from 6100. Keep it the same as the port in your tunnel. |
+
+Anyone who can open the viewer controls the browser and your ChatGPT login. The
+viewer has no password of its own, so only SSH protects it. On a server shared
+with other accounts, those accounts can also reach `127.0.0.1` while login is
+running. Never expose the viewer port on a public interface. See
+[Security model](security-model.md#remote-login).
 
 Only one process can own the persistent browser profile at a time. Session
 browsers close after every completed response, and an idle daemon does not hold
@@ -134,8 +199,9 @@ keeps only the `result` line; doing so hides the status stream during long
 responses. Agents should consume every line as it arrives, show or retain each
 `status.message`, and finish with `result.answer`.
 
-`login` always uses a visible window so authentication can be completed
-interactively.
+`login` always uses a visible browser, either a local window or the
+[remote login](#remote-login-on-a-headless-server) viewer, so authentication
+can be completed interactively.
 
 ## Persistent agent sessions
 

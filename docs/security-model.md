@@ -24,6 +24,21 @@ separately downloaded external binary governed by its own license and security
 boundary; see [Install a release](../README.md#install-a-release) and
 [Disclaimer](legal.md).
 
+## Remote login
+
+On a Linux machine without a desktop, `cloakgpt login` runs the browser on a
+temporary virtual display. It shows that display through a VNC web viewer bound
+only to `127.0.0.1`, which the user reaches through an SSH tunnel. The viewer has
+no VNC password or TLS of its own: SSH authentication and encryption protect it.
+Whoever can open the viewer controls the browser, including the ChatGPT account
+being signed in.
+
+The display and viewer exist only while `login` runs, and stop when it finishes,
+is interrupted, or loses its SSH session. While they run, any process or account
+on the same machine that can connect to `127.0.0.1` can also open the viewer.
+Run remote login only on a machine whose local accounts you trust, and never
+forward or bind the viewer port to a public interface.
+
 ## User data
 
 Packaged executables store the persistent browser profile and last conversation

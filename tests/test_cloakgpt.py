@@ -1,11 +1,14 @@
 import io
 from pathlib import Path
 import json
+import signal
+import time
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from unittest.mock import Mock, patch
 
 import cloakgpt
+import cloakgpt_display
 import cloakgpt_session
 
 
@@ -137,26 +140,60 @@ class CloakGPTCliTests(unittest.TestCase):
 
         self.assertEqual(result, 2)
 
-    @patch("builtins.input", return_value="")
+    def _open_page(self, url: str = "about:blank") -> Mock:
+        page = Mock()
+        page.url = url
+        page.is_closed.return_value = False
+        return page
+
+    def _run_login(
+        self,
+        arguments: list[str],
+        *,
+        desktop: bool = True,
+        interactive: bool = False,
+        starts_signed_in: bool = False,
+        signed_in=(True,),
+    ):
+        output = io.StringIO()
+        stdin = Mock()
+        stdin.isatty.return_value = interactive
+        with patch("cloakgpt.has_graphical_display", return_value=desktop), patch(
+            "cloakgpt.sys.stdin", stdin
+        ), patch(
+            "cloakgpt._starts_signed_in", return_value=starts_signed_in
+        ), patch(
+            "cloakgpt._page_is_signed_in", side_effect=signed_in
+        ) as page_is_signed_in, redirect_stdout(output):
+            result = cloakgpt.main(arguments)
+        return result, output.getvalue(), page_is_signed_in
+
+    @patch("cloakgpt.open_remote_display")
     @patch("cloakgpt.launch_chatgpt_context")
-    def test_login_command(self, launch_chatgpt_context, user_input) -> None:
+    def test_login_command(self, launch_chatgpt_context, open_remote_display) -> None:
         context = Mock()
-        login_page = Mock()
-        login_page.url = "about:blank"
-        extra_blank_page = Mock()
-        extra_blank_page.url = "about:blank"
-        existing_page = Mock()
-        existing_page.url = "https://example.com/"
+        login_page = self._open_page()
+        extra_blank_page = self._open_page()
+        existing_page = self._open_page("https://example.com/")
         context.pages = [login_page, extra_blank_page, existing_page]
+        extra_blank_page.close.side_effect = lambda: context.pages.remove(
+            extra_blank_page
+        )
         launch_chatgpt_context.return_value = context
 
-        result = cloakgpt.main(["login", "--timezone", "Asia/Taipei"])
+        result, output, _ = self._run_login(
+            ["login", "--timezone", "Asia/Taipei"],
+            signed_in=(False, False, True),
+        )
 
         self.assertEqual(result, 0)
+        open_remote_display.assert_not_called()
         launch_chatgpt_context.assert_called_once_with(
             cloakgpt.DEFAULT_PROFILE_DIR,
             headless=False,
             timezone="Asia/Taipei",
+            env=None,
+            args=None,
         )
         context.new_page.assert_not_called()
         login_page.goto.assert_called_once_with(
@@ -165,33 +202,257 @@ class CloakGPTCliTests(unittest.TestCase):
         )
         extra_blank_page.close.assert_called_once_with()
         existing_page.close.assert_not_called()
-        user_input.assert_called_once()
+        self.assertEqual(
+            [call.args for call in login_page.wait_for_timeout.call_args_list],
+            [(cloakgpt.LOGIN_POLL_MS,), (cloakgpt.LOGIN_SAVE_DELAY_MS,)],
+        )
+        self.assertIn("Signed in. Saving the session...", output)
         context.close.assert_called_once_with()
 
-    @patch("builtins.input", return_value="")
     @patch("cloakgpt.launch_chatgpt_context")
     def test_login_creates_page_when_context_has_none(
         self,
         launch_chatgpt_context,
-        _user_input,
     ) -> None:
         context = Mock()
         context.pages = []
+        new_page = self._open_page()
+        context.new_page.side_effect = lambda: context.pages.append(new_page) or new_page
         launch_chatgpt_context.return_value = context
 
-        result = cloakgpt.main(["login"])
+        result, _, _ = self._run_login(["login"])
 
         self.assertEqual(result, 0)
         context.new_page.assert_called_once_with()
-        context.new_page.return_value.goto.assert_called_once_with(
+        new_page.goto.assert_called_once_with(
             cloakgpt.CHATGPT_URL,
             wait_until="domcontentloaded",
         )
 
+    @patch("builtins.input", return_value="")
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_finishes_when_enter_is_pressed(
+        self,
+        launch_chatgpt_context,
+        user_input,
+    ) -> None:
+        context = Mock()
+        page = self._open_page()
+        page.wait_for_timeout.side_effect = lambda _ms: time.sleep(0.01)
+        context.pages = [page]
+        launch_chatgpt_context.return_value = context
+
+        result, output, _ = self._run_login(
+            ["login"],
+            interactive=True,
+            signed_in=iter(lambda: False, True),
+        )
+
+        self.assertEqual(result, 0)
+        user_input.assert_called_once_with()
+        self.assertIn("or press Enter here to finish now.", output)
+        self.assertNotIn("Signed in.", output)
+        context.close.assert_called_once_with()
+
+    @patch("builtins.input", return_value="")
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_keeps_signed_in_profile_open_until_enter(
+        self,
+        launch_chatgpt_context,
+        user_input,
+    ) -> None:
+        context = Mock()
+        page = self._open_page()
+        page.wait_for_timeout.side_effect = lambda _ms: time.sleep(0.01)
+        context.pages = [page]
+        launch_chatgpt_context.return_value = context
+
+        result, output, page_is_signed_in = self._run_login(
+            ["login"],
+            interactive=True,
+            starts_signed_in=True,
+        )
+
+        self.assertEqual(result, 0)
+        user_input.assert_called_once_with()
+        page_is_signed_in.assert_not_called()
+        self.assertIn("already signed in", output)
+        context.close.assert_called_once_with()
+
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_returns_when_signed_in_without_terminal(
+        self,
+        launch_chatgpt_context,
+    ) -> None:
+        context = Mock()
+        page = self._open_page()
+        context.pages = [page]
+        launch_chatgpt_context.return_value = context
+
+        result, output, _ = self._run_login(["login"], starts_signed_in=True)
+
+        self.assertEqual(result, 0)
+        self.assertIn("This ChatGPT profile is already signed in.", output)
+        page.wait_for_timeout.assert_not_called()
+        context.close.assert_called_once_with()
+
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_returns_when_browser_is_closed(
+        self,
+        launch_chatgpt_context,
+    ) -> None:
+        context = Mock()
+        page = self._open_page()
+        context.pages = [page]
+        launch_chatgpt_context.return_value = context
+        page.goto.side_effect = lambda *_args, **_kwargs: page.is_closed.configure_mock(
+            return_value=True
+        )
+
+        result, output, page_is_signed_in = self._run_login(["login"])
+
+        self.assertEqual(result, 0)
+        page_is_signed_in.assert_not_called()
+        self.assertNotIn("Signed in.", output)
+        context.close.assert_called_once_with()
+
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_stop_signal_closes_browser_before_exiting(
+        self,
+        launch_chatgpt_context,
+    ) -> None:
+        context = Mock()
+        page = self._open_page()
+        context.pages = [page]
+        launch_chatgpt_context.return_value = context
+        # The signal lands inside a Playwright wait, where raising would leave
+        # the browser impossible to close.
+        page.wait_for_timeout.side_effect = lambda _ms: signal.raise_signal(signal.SIGINT)
+        errors = io.StringIO()
+
+        with redirect_stderr(errors):
+            result, output, _ = self._run_login(
+                ["login"],
+                signed_in=iter(lambda: False, True),
+            )
+
+        self.assertEqual(result, 130)
+        self.assertEqual(errors.getvalue().strip(), "stopped")
+        page.wait_for_timeout.assert_called_once_with(cloakgpt.LOGIN_POLL_MS)
+        context.close.assert_called_once_with()
+        self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)
+
+    def _remote_display(self, opened: list) -> Mock:
+        display = Mock()
+        display.backend = "tigervnc"
+        display.display = 100
+        display.port = 6100
+        display.viewer_url = "http://127.0.0.1:6100/vnc.html?autoconnect=1"
+        display.env = {"DISPLAY": ":100"}
+        display.browser_args = ["--window-position=0,0", "--window-size=1280,800"]
+
+        @contextmanager
+        def open_remote_display(backend, port):
+            opened.append((backend, port))
+            yield display
+            opened.append("closed")
+
+        return display, open_remote_display
+
+    @patch("cloakgpt.ssh_tunnel_hint", return_value="ssh -N -L 6100:127.0.0.1:6100 root@192.168.50.250")
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_uses_remote_display_without_desktop(
+        self,
+        launch_chatgpt_context,
+        tunnel_hint,
+    ) -> None:
+        opened = []
+        display, open_remote_display = self._remote_display(opened)
+        context = Mock()
+        context.pages = [self._open_page()]
+        context.close.side_effect = lambda: opened.append("browser closed")
+        launch_chatgpt_context.return_value = context
+
+        with patch("cloakgpt.open_remote_display", side_effect=open_remote_display):
+            result, output, _ = self._run_login(["login"], desktop=False)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(opened, [("auto", None), "browser closed", "closed"])
+        launch_chatgpt_context.assert_called_once_with(
+            cloakgpt.DEFAULT_PROFILE_DIR,
+            headless=False,
+            timezone="Asia/Taipei",
+            env=display.env,
+            args=display.browser_args,
+        )
+        tunnel_hint.assert_called_once_with(6100)
+        self.assertIn("ssh -N -L 6100:127.0.0.1:6100 root@192.168.50.250", output)
+        self.assertIn(display.viewer_url, output)
+
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_remote_flag_selects_backend_and_port_on_desktop(
+        self,
+        launch_chatgpt_context,
+    ) -> None:
+        opened = []
+        _display, open_remote_display = self._remote_display(opened)
+        context = Mock()
+        context.pages = [self._open_page()]
+        launch_chatgpt_context.return_value = context
+
+        with patch("cloakgpt.open_remote_display", side_effect=open_remote_display):
+            result, _, _ = self._run_login(
+                ["login", "--remote", "--vnc", "kasmvnc", "--port", "7000"],
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(opened[0], ("kasmvnc", 7000))
+
+    @patch("cloakgpt.open_remote_display")
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_local_flag_skips_remote_display_without_desktop(
+        self,
+        launch_chatgpt_context,
+        open_remote_display,
+    ) -> None:
+        context = Mock()
+        context.pages = [self._open_page()]
+        launch_chatgpt_context.return_value = context
+
+        result, _, _ = self._run_login(["login", "--local"], desktop=False)
+
+        self.assertEqual(result, 0)
+        open_remote_display.assert_not_called()
+        self.assertIsNone(launch_chatgpt_context.call_args.kwargs["env"])
+
+    def test_login_modes_are_mutually_exclusive(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exit_error:
+            cloakgpt.main(["login", "--local", "--remote"])
+
+        self.assertEqual(exit_error.exception.code, 2)
+
+    @patch("cloakgpt.launch_chatgpt_context")
+    def test_login_reports_missing_remote_display(
+        self,
+        launch_chatgpt_context,
+    ) -> None:
+        errors = io.StringIO()
+        with patch(
+            "cloakgpt.open_remote_display",
+            side_effect=cloakgpt_display.RemoteDisplayError("no VNC server"),
+        ), redirect_stderr(errors):
+            result, _, _ = self._run_login(["login", "--remote"])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(errors.getvalue().strip(), "error: no VNC server")
+        launch_chatgpt_context.assert_not_called()
+
+    @patch("cloakgpt.has_graphical_display", return_value=True)
     @patch("cloakgpt.launch_chatgpt_context")
     def test_login_reports_existing_profile_without_browser_log(
         self,
         launch_chatgpt_context,
+        _has_graphical_display,
     ) -> None:
         launch_chatgpt_context.side_effect = RuntimeError(
             "the CloakGPT browser profile is already in use. Close any "

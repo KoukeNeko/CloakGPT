@@ -187,11 +187,22 @@ else
     echo "Retry with: '$executable' browser install" >&2
 fi
 
+remote_login_hint=false
+if [ "$(uname -s)" = Linux ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    remote_login_hint=true
+fi
+
 login_state="NOT STARTED"
 if [ "$browser_installed" = true ]; then
     if [ -t 0 ] && [ -t 1 ]; then
         echo
-        echo "CloakGPT and CloakBrowser are ready. Opening ChatGPT login..."
+        if [ "$remote_login_hint" = true ]; then
+            # `login` detects the missing desktop itself and serves the browser
+            # through a loopback-only web viewer reached over SSH.
+            echo "CloakGPT and CloakBrowser are ready. No desktop was detected, so starting a remote ChatGPT login..."
+        else
+            echo "CloakGPT and CloakBrowser are ready. Opening ChatGPT login..."
+        fi
         if "$executable" login; then
             login_state="FLOW COMPLETED"
         else
@@ -237,6 +248,10 @@ if [ "$browser_installed" != true ]; then
 elif [ "$login_state" != "FLOW COMPLETED" ]; then
     echo "  Next step"
     echo "    '$executable' login"
+    if [ "$remote_login_hint" = true ]; then
+        echo "  Without a desktop, login needs a VNC web viewer, for example:"
+        echo "    sudo apt install tigervnc-standalone-server novnc websockify"
+    fi
 else
     echo "  Quick start"
     echo "    session_id=\$('$executable' session open)"

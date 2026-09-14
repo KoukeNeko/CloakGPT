@@ -1331,5 +1331,68 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.assertEqual(data_dir, custom_dir)
 
 
+class LoginBrowserTests(unittest.TestCase):
+    @patch("chatgpt_browser.launch_persistent_context")
+    def test_launch_keeps_cloakbrowser_defaults_without_display_options(
+        self,
+        launch,
+    ) -> None:
+        chatgpt_browser.launch_chatgpt_context(
+            Path("profile"),
+            headless=False,
+            timezone="Asia/Taipei",
+        )
+
+        launch.assert_called_once_with(
+            "profile",
+            headless=False,
+            locale="ja-JP",
+            timezone="Asia/Taipei",
+        )
+
+    @patch("chatgpt_browser.launch_persistent_context")
+    def test_launch_forwards_remote_display_environment_and_args(
+        self,
+        launch,
+    ) -> None:
+        env = {"HOME": "/root", "DISPLAY": ":100"}
+        args = ["--window-position=0,0", "--window-size=1280,800"]
+
+        chatgpt_browser.launch_chatgpt_context(
+            Path("profile"),
+            headless=False,
+            timezone="Asia/Taipei",
+            env=env,
+            args=args,
+        )
+
+        self.assertEqual(launch.call_args.kwargs["env"], env)
+        self.assertEqual(launch.call_args.kwargs["args"], args)
+
+    def _page(self, url: str, control_visible: bool) -> Mock:
+        page = Mock()
+        page.url = url
+        page.locator.return_value.first.is_visible.return_value = control_visible
+        return page
+
+    def test_page_is_signed_in_needs_chatgpt_model_control(self) -> None:
+        self.assertTrue(
+            chatgpt_browser.page_is_signed_in(
+                self._page("https://chatgpt.com/", True)
+            )
+        )
+        self.assertFalse(
+            chatgpt_browser.page_is_signed_in(
+                self._page("https://chatgpt.com/", False)
+            )
+        )
+
+    def test_page_is_signed_in_ignores_login_pages(self) -> None:
+        page = self._page("https://auth.openai.com/log-in", True)
+
+        self.assertFalse(chatgpt_browser.page_is_signed_in(page))
+        page.locator.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,21 +4,35 @@ import argparse
 import ctypes
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from collections.abc import Sequence
 
 from cloakbrowser.__main__ import main as cloakbrowser_main
 from playwright._impl._driver import compute_driver_executable
+from playwright.sync_api import Error as PlaywrightError
 
 from chatgpt_browser import (
     CHATGPT_URL,
     ChatGPTModel,
     DEFAULT_PROFILE_DIR,
+    REASONING_TRIGGER_SELECTOR,
     ReasoningLevel,
+    SIGNED_OUT_CONTROL_TIMEOUT_MS,
     launch_chatgpt_context,
+    page_is_signed_in,
+)
+from cloakgpt_display import (
+    AUTO_BACKEND,
+    BACKENDS,
+    has_graphical_display,
+    open_remote_display,
+    ssh_tunnel_hint,
 )
 from cloakgpt_session import (
     DaemonNotRunningError,
@@ -75,19 +89,153 @@ def _login_page(context):
     return page
 
 
-def login(timezone: str) -> None:
-    """Open the persistent browser profile for an interactive ChatGPT login."""
-    context = launch_chatgpt_context(
-        DEFAULT_PROFILE_DIR,
-        headless=False,
-        timezone=timezone,
-    )
+LOGIN_POLL_MS = 1_000
+LOGIN_SAVE_DELAY_MS = 3_000
+
+
+def _page_is_signed_in(page) -> bool:
     try:
-        page = _login_page(context)
-        page.goto(CHATGPT_URL, wait_until="domcontentloaded")
-        input("Sign in in the browser window, then press Enter here to save the session...")
+        return page_is_signed_in(page)
+    except PlaywrightError:
+        # A page that is navigating or closing simply is not signed in yet.
+        return False
+
+
+def _starts_signed_in(page) -> bool:
+    # ChatGPT renders its model control late, so a profile that is already
+    # signed in gets the same grace period `_is_signed_out` allows.
+    try:
+        page.locator(REASONING_TRIGGER_SELECTOR).first.wait_for(
+            state="visible",
+            timeout=SIGNED_OUT_CONTROL_TIMEOUT_MS,
+        )
+    except PlaywrightError:
+        return False
+    return True
+
+
+def _wait_for_enter(pressed: threading.Event) -> None:
+    try:
+        input()
+    except (EOFError, OSError):
+        return
+    pressed.set()
+
+
+def _wait_for_login(context, page, stop_requested: threading.Event) -> None:
+    """Return once the user signs in, presses Enter, closes the browser, or stops."""
+    pressed = threading.Event()
+    interactive = sys.stdin.isatty()
+    if interactive:
+        threading.Thread(target=_wait_for_enter, args=(pressed,), daemon=True).start()
+
+    # Finishing on its own is reserved for a sign-in that happens here, so a
+    # profile opened to switch accounts stays open until the user is done.
+    if _starts_signed_in(page):
+        if not interactive:
+            print("This ChatGPT profile is already signed in.")
+            return
+        print("This profile is already signed in. Press Enter here to close the browser...")
+        auto_finish = False
+    else:
+        print(
+            "Sign in to ChatGPT in the browser. CloakGPT saves the session once "
+            "you are signed in"
+            + (", or press Enter here to finish now." if interactive else "."),
+            flush=True,
+        )
+        auto_finish = True
+
+    while not pressed.is_set() and not stop_requested.is_set():
+        pages = [candidate for candidate in context.pages if not candidate.is_closed()]
+        if not pages:
+            return
+        if auto_finish and any(_page_is_signed_in(candidate) for candidate in pages):
+            print("Signed in. Saving the session...")
+            pages[0].wait_for_timeout(LOGIN_SAVE_DELAY_MS)
+            return
+        try:
+            pages[0].wait_for_timeout(LOGIN_POLL_MS)
+        except PlaywrightError:
+            time.sleep(LOGIN_POLL_MS / 1_000)
+
+
+@contextmanager
+def _deferred_interrupts():
+    """Turn Ctrl+C, a dropped SSH session, or `kill` into a request to stop.
+
+    An exception raised inside a Playwright call leaves its sync API unable to
+    close the browser, which would lose the profile and strand a virtual
+    display. The first signal therefore only asks the login to wind down; a
+    second one interrupts immediately.
+    """
+    requested = threading.Event()
+
+    def request_stop(_signum, _frame) -> None:
+        if requested.is_set():
+            raise KeyboardInterrupt
+        requested.set()
+
+    previous = {}
+    for name in ("SIGINT", "SIGHUP", "SIGTERM"):
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        try:
+            previous[number] = signal.signal(number, request_stop)
+        except ValueError:
+            # Signal handlers can only be installed from the main thread.
+            break
+    try:
+        yield requested
     finally:
-        context.close()
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
+def _print_remote_login_instructions(display) -> None:
+    print(f"Remote ChatGPT login is ready ({display.backend}, display :{display.display}).")
+    print()
+    print("On your own computer, open an SSH tunnel:")
+    print(f"  {ssh_tunnel_hint(display.port)}")
+    print("Then open this address in your browser:")
+    print(f"  {display.viewer_url}")
+    print()
+    print(
+        "Anyone who can open that page controls this login. Keep the port on "
+        "127.0.0.1 and reach it only through SSH."
+    )
+    # A caller reading this through a pipe needs the address before login ends.
+    print(flush=True)
+
+
+def login(
+    timezone: str,
+    mode: str = "auto",
+    vnc: str = AUTO_BACKEND,
+    port: int | None = None,
+) -> None:
+    """Open the persistent browser profile for an interactive ChatGPT login."""
+    remote = mode == "remote" or (mode == "auto" and not has_graphical_display())
+    with _deferred_interrupts() as stop_requested:
+        with open_remote_display(vnc, port) if remote else nullcontext() as display:
+            if display is not None:
+                _print_remote_login_instructions(display)
+            context = launch_chatgpt_context(
+                DEFAULT_PROFILE_DIR,
+                headless=False,
+                timezone=timezone,
+                env=display.env if display is not None else None,
+                args=display.browser_args if display is not None else None,
+            )
+            try:
+                page = _login_page(context)
+                page.goto(CHATGPT_URL, wait_until="domcontentloaded")
+                _wait_for_login(context, page, stop_requested)
+            finally:
+                context.close()
+    if stop_requested.is_set():
+        raise KeyboardInterrupt
 
 
 def _add_shared_options(
@@ -211,6 +359,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--timezone",
         default="Asia/Taipei",
         help="user's IANA timezone (default: Asia/Taipei)",
+    )
+    login_mode = login_parser.add_mutually_exclusive_group()
+    login_mode.add_argument(
+        "--local",
+        action="store_const",
+        const="local",
+        dest="mode",
+        help="open the browser on this machine's desktop",
+    )
+    login_mode.add_argument(
+        "--remote",
+        action="store_const",
+        const="remote",
+        dest="mode",
+        help=(
+            "Linux: show the browser in a temporary loopback-only web viewer to "
+            "reach over SSH (default when no desktop is detected)"
+        ),
+    )
+    login_parser.set_defaults(mode="auto")
+    login_parser.add_argument(
+        "--vnc",
+        choices=(AUTO_BACKEND, *BACKENDS),
+        default=AUTO_BACKEND,
+        help="remote login VNC backend (default: auto, preferring tigervnc)",
+    )
+    login_parser.add_argument(
+        "--port",
+        type=int,
+        help="remote login viewer port on 127.0.0.1 (default: first free from 6100)",
     )
 
     commands.add_parser(
@@ -611,7 +789,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "login":
-            login(args.timezone)
+            login(args.timezone, args.mode, args.vnc, args.port)
             return 0
         if args.command == "session":
             return _run_session_command(args)
