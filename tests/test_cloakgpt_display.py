@@ -159,6 +159,31 @@ class CommandTests(unittest.TestCase):
 
         self.assertEqual(env, {"HOME": "/root", "DISPLAY": ":100"})
 
+    def test_packaged_build_restores_the_callers_library_path(self) -> None:
+        env = cloakgpt_display.display_env(
+            100,
+            {
+                "LD_LIBRARY_PATH": "/tmp/_MEIabc:/opt/lib",
+                "LD_LIBRARY_PATH_ORIG": "/opt/lib",
+            },
+            frozen=True,
+        )
+
+        self.assertEqual(env, {"LD_LIBRARY_PATH": "/opt/lib", "DISPLAY": ":100"})
+
+    def test_packaged_build_drops_library_path_it_added(self) -> None:
+        env = cloakgpt_display.system_env(
+            {"HOME": "/root", "LD_LIBRARY_PATH": "/tmp/_MEIabc"},
+            frozen=True,
+        )
+
+        self.assertEqual(env, {"HOME": "/root"})
+
+    def test_source_run_keeps_library_path(self) -> None:
+        environ = {"LD_LIBRARY_PATH": "/opt/lib", "LD_LIBRARY_PATH_ORIG": "/x"}
+
+        self.assertEqual(cloakgpt_display.system_env(environ, frozen=False), environ)
+
     def test_browser_args_fill_the_virtual_screen(self) -> None:
         display = cloakgpt_display.RemoteDisplay(
             backend="tigervnc",
@@ -287,6 +312,7 @@ class ProcessLifecycleTests(unittest.TestCase):
 
         self.assertEqual([call.args[0][0] for call in popen.call_args_list], ["Xtigervnc", "websockify"])
         self.assertEqual(popen.call_args_list[1].args[0][-2], "127.0.0.1:6200")
+        self.assertEqual(popen.call_args.kwargs["env"], {"HOME": "/root"})
         wait_until_ready.assert_called_once()
         for process in processes:
             process.terminate.assert_called_once_with()

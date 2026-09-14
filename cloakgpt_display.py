@@ -6,6 +6,7 @@ import platform
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -206,18 +207,36 @@ def viewer_url(backend: str, port: int) -> str:
     return f"http://{LOOPBACK}:{port}/"
 
 
+def system_env(
+    environ: Mapping[str, str] = os.environ,
+    frozen: bool | None = None,
+) -> dict[str, str]:
+    """The environment for a program installed outside this executable."""
+    env = dict(environ)
+    if frozen is None:
+        frozen = getattr(sys, "frozen", False)
+    if frozen:
+        # A packaged build points the loader at the libraries it bundles, which
+        # breaks system programs such as websockify's Python; PyInstaller keeps
+        # the caller's original value alongside for exactly this purpose.
+        original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+        if original is None:
+            env.pop("LD_LIBRARY_PATH", None)
+        else:
+            env["LD_LIBRARY_PATH"] = original
+    return env
+
+
 def display_env(
     display: int,
     environ: Mapping[str, str] = os.environ,
+    frozen: bool | None = None,
 ) -> dict[str, str]:
     # Playwright replaces the browser's environment instead of merging it, so
     # the whole environment is passed along with the virtual display. Wayland
     # is dropped so Chromium cannot pick a session the viewer does not show.
-    env = {
-        name: value
-        for name, value in environ.items()
-        if name != "WAYLAND_DISPLAY"
-    }
+    env = system_env(environ, frozen)
+    env.pop("WAYLAND_DISPLAY", None)
     env["DISPLAY"] = f":{display}"
     return env
 
@@ -308,6 +327,7 @@ def open_remote_display(
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
+                env=system_env(),
             )
             processes.append((command[0], process, log))
         wait_until_ready(processes, display, port)
