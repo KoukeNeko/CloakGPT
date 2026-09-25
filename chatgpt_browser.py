@@ -19,21 +19,28 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 
 CHATGPT_URL = "https://chatgpt.com/"
-PROMPT_EDITOR_SELECTOR = "#prompt-textarea"
-SEND_BUTTON_SELECTOR = '[data-testid="send-button"]'
+PROMPT_EDITOR_SELECTOR = '[data-composer-markdown][contenteditable="true"]'
+COMPOSER_FORM_SELECTOR = f"form:has({PROMPT_EDITOR_SELECTOR})"
+SEND_BUTTON_SELECTOR = f'{COMPOSER_FORM_SELECTOR} button[type="submit"]'
 SIGNED_OUT_MARKER_SELECTOR = 'a[href^="https://chatgpt.com/auth/login"]'
 LIGHTWEIGHT_COMPOSER_SELECTOR = 'textarea[name="prompt"]'
 SIGNED_OUT_LABEL = "signed-out default"
 COMPOSER_TIMEOUT_MS = 30_000
 SIGNED_OUT_CONTROL_TIMEOUT_MS = 5_000
-ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]'
-STOP_BUTTON_SELECTOR = '[data-testid="stop-button"]'
-CITATION_PILL_SELECTOR = '[data-testid="webpage-citation-pill"]'
-SOURCE_POPOVER_SELECTOR = '[data-radix-popper-content-wrapper]:visible'
+ASSISTANT_MESSAGE_SELECTOR = '[data-content-search-unit-key$=":assistant"]'
+# One turn holds a prompt and everything ChatGPT showed in reply to it.
+TURN_SELECTOR = "[data-turn-key]"
+TURN_KEY_ATTRIBUTE = "data-turn-key"
+CITATION_PILL_SELECTOR = 'a[data-testid="chatgpt-citation"]'
+SOURCE_POPOVER_SELECTOR = '[role="tooltip"]:visible'
 REASONING_TRIGGER_SELECTOR = (
     'form button[aria-haspopup="menu"]:not(#composer-plus-btn)'
 )
 ADVANCED_VIEW_SELECTOR = '[role="menuitem"][aria-label="詳細表示にする"]'
+# The simple model picker keeps its model list in an inert panel until this
+# item switches the menu to it.
+MODEL_VIEW_TOGGLE_SELECTOR = '[role="menuitem"][data-model-picker-view-toggle]'
+INERT_OPTION_SCRIPT = "option => !!option.closest('[inert]')"
 REASONING_SUBMENU_ITEM_SELECTOR = '[role="menuitem"][aria-haspopup="menu"]'
 REASONING_OPTION_SELECTOR = '[role="menuitemradio"]'
 INLINE_REASONING_SELECTOR = (
@@ -230,9 +237,11 @@ class ChatGPTSource:
 
 
 RENDER_MARKDOWN_SCRIPT = r"""response => {
-  const citationSelector = '[data-testid="webpage-citation-pill"]';
+  const citationSelector = '[data-testid="chatgpt-citation"]';
   const interactiveWidgetSelector = '[data-testid="dil-widget-shell"]';
   const attributionSelector = '[data-message-attribution]';
+  // Table and code block toolbars ChatGPT itself leaves out of copied text.
+  const copyExcludedSelector = '[data-markdown-copy="exclude"]';
 
   function children(node) {
     return [...node.childNodes].map(render).join('');
@@ -278,12 +287,32 @@ RENDER_MARKDOWN_SCRIPT = r"""response => {
     }).join('\n') + '\n\n';
   }
 
+  function fenced(text, language) {
+    const code = text.replace(/\n$/, '');
+    const fence = code.includes('```') ? '````' : '```';
+    return `${fence}${language}\n${code}\n${fence}\n\n`;
+  }
+
+  // A finished code block is an editor tagged with its language; while it
+  // streams it is a plain <pre>, and only the header names the language.
+  function codeBlock(node) {
+    const editor = node.querySelector('[data-language]');
+    const source = editor || node.querySelector('pre') || node;
+    const header = node.querySelector(':scope > [data-markdown-copy="exclude"] > div');
+    const language = editor?.getAttribute('data-language')
+      || (header?.innerText || '').trim().toLowerCase();
+    return fenced(source.innerText, language);
+  }
+
   function render(node) {
     if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
     if (node.nodeType !== Node.ELEMENT_NODE) return '';
     if (node.matches(
-      `${citationSelector}, ${interactiveWidgetSelector}, ${attributionSelector}`
+      `${citationSelector}, ${interactiveWidgetSelector}, ${attributionSelector}, `
+      + `${copyExcludedSelector}, [hidden]`
     )) return '';
+
+    if (node.matches('[data-markdown-copy="code-block"]')) return codeBlock(node);
 
     const tag = node.tagName;
     const content = () => children(node);
@@ -300,13 +329,10 @@ RENDER_MARKDOWN_SCRIPT = r"""response => {
     }
     if (tag === 'PRE') {
       const code = node.querySelector('code');
-      const text = (code || node).innerText.replace(/\n$/, '');
       const languageClass = [...(code?.classList || [])].find(
         name => name.startsWith('language-')
       );
-      const language = languageClass ? languageClass.slice(9) : '';
-      const fence = text.includes('```') ? '````' : '```';
-      return `${fence}${language}\n${text}\n${fence}\n\n`;
+      return fenced((code || node).innerText, languageClass ? languageClass.slice(9) : '');
     }
     if (tag === 'CODE') return `\`${content()}\``;
     if (tag === 'STRONG' || tag === 'B') return `**${content()}**`;
@@ -328,62 +354,67 @@ RENDER_MARKDOWN_SCRIPT = r"""response => {
     return content();
   }
 
-  const body = response.querySelector('.markdown') || response;
+  const body = response.querySelector(
+    '[data-markdown-text-style="assistant-message"]'
+  ) || response;
   return render(body)
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }"""
 
-TURN_ID_SCRIPT = """response => response
-  .closest('section[data-turn="assistant"]')
-  ?.getAttribute('data-testid') || null"""
-
 RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId, noticeMarkers}) => {
   const messages = document.querySelectorAll(
-    '[data-message-author-role="assistant"]'
+    '[data-content-search-unit-key$=":assistant"]'
   );
   const response = messages[messages.length - 1];
-  const turn = [...document.querySelectorAll('section[data-turn="assistant"]')]
-    .find(element => element.getAttribute('data-testid') === turnId)
-    || response?.closest('section[data-turn="assistant"]');
+  const turns = [...document.querySelectorAll('[data-turn-key]')];
+  const turn = turns.find(element => element.getAttribute('data-turn-key') === turnId)
+    || turns[turns.length - 1];
   const visible = element => !!(element && (
     element.offsetWidth
     || element.offsetHeight
     || element.getClientRects().length
   ));
+  // What a reader sees: hidden and aria-hidden copies (the shimmer overlay on
+  // activity labels repeats its text) are skipped.
+  const shownText = (root, skipSelector) => {
+    if (!root) return '';
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const parts = [];
+    while (walker.nextNode()) {
+      const parent = walker.currentNode.parentElement;
+      if (parent?.closest('[hidden], [aria-hidden="true"]')) continue;
+      if (skipSelector && parent?.closest(skipSelector)) continue;
+      parts.push(walker.currentNode.nodeValue);
+    }
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  };
   const stopButtonVisible = [...document.querySelectorAll(
-    '[data-testid="stop-button"]'
+    'form:has([data-composer-markdown]) button[aria-label="停止"]'
   )].some(visible);
-  const messageId = response?.getAttribute('data-message-id') || '';
+  const body = response?.querySelector(
+    '[data-markdown-text-style="assistant-message"]'
+  );
   const generating = stopButtonVisible
-    || messageId.startsWith('request-placeholder-')
-    || !!response?.querySelector('[aria-busy="true"], .streaming-animation');
-  // A lost reply is rendered as a notice inside the message but outside the
-  // answer body, and gains a retry button once ChatGPT stops retrying itself.
-  const markedNotice = [...(turn?.querySelectorAll(
-    '[data-message-author-role="assistant"] .markdown'
-  ) || [])]
-    .filter(element => !element.closest('.prose'))
-    .map(element => (element.innerText || '').trim())
-    .filter(text => noticeMarkers.some(marker => text.includes(marker)))
+    || !!body?.hasAttribute('data-markdown-animated')
+    || !!turn?.querySelector('[aria-busy="true"]');
+  // A lost reply is rendered as an alert in the turn, with a retry button once
+  // ChatGPT stops retrying itself; older notices are plain text beside the
+  // answer, so they are only recognized by their wording.
+  const alert = [...(turn?.querySelectorAll('[role="alert"]') || [])]
+    .map(element => shownText(element, 'button'))
+    .filter(Boolean)
     .pop();
-  const retryButton = turn?.querySelector(
-    '[data-testid="regenerate-thread-error-button"]'
+  const agentArea = turn?.querySelector('[data-chatgpt-agent-turn-start]')?.parentElement;
+  const agentText = shownText(
+    agentArea,
+    '[data-content-search-unit-key], button, [role="alert"]'
   );
-  const retryNotice = retryButton && (
-    (retryButton.parentElement?.querySelector('.markdown')?.innerText || '').trim()
-    || (retryButton.innerText || '').trim()
-  );
-  const notice = markedNotice || retryNotice || null;
-  const statusButton = [...(turn?.querySelectorAll('button') || [])]
-    .filter(visible)
-    .find(button => {
-      const text = (button.innerText || '').trim();
-      const ariaLabel = button.getAttribute('aria-label') || '';
-      return /思考中|考えました/.test(text)
-        || ariaLabel.endsWith('中');
-    });
+  const markedNotice = noticeMarkers.some(marker => agentText.includes(marker))
+    ? agentText
+    : null;
+  const notice = alert || markedNotice || null;
   return {
     progress: (response?.innerText || '').length,
     generating,
@@ -391,14 +422,12 @@ RESPONSE_STATE_SCRIPT = r"""({previousCount, turnId, noticeMarkers}) => {
     // Only a finished turn gets its copy control, so an answer is complete
     // when that appears rather than merely when the busy signals are gone.
     complete: messages.length > previousCount
-      && !!response?.innerText.trim()
+      && !!body?.innerText.trim()
       && !generating
       && !notice
-      && !!turn?.querySelector('[data-testid="copy-turn-action-button"]'),
-    status: statusButton
-      ? ((statusButton.innerText || '').trim()
-        || statusButton.getAttribute('aria-label'))
-      : null
+      && !!turn?.querySelector('button[aria-label="コピーする"]'),
+    // Search and thinking progress is shown as text before the answer.
+    status: (!markedNotice && agentText) || null
   };
 }"""
 
@@ -412,8 +441,14 @@ def reply_state_argument(previous_count: int, turn_id: str | None) -> dict:
     }
 
 
-STANDARD_FIRST_RESPONSE_SCRIPT = """([selector, previousCount]) =>
-  document.querySelectorAll(selector).length > previousCount"""
+# Search and thinking progress, or an alert for a reply lost before it started,
+# fill the new turn before any answer does, so the turn itself is the signal.
+STANDARD_FIRST_RESPONSE_SCRIPT = """([selector, previousCount, previousTurn]) => {
+  if (document.querySelectorAll(selector).length > previousCount) return true;
+  const turns = document.querySelectorAll('[data-turn-key]');
+  const turn = turns[turns.length - 1];
+  return !!turn && turn.getAttribute('data-turn-key') !== previousTurn;
+}"""
 
 # The lightweight transcript opens with a greeting turn and is rebuilt when
 # submitting navigates to the conversation, so counting messages cannot tell a
@@ -604,6 +639,9 @@ def _validate_conversation_url(url: str) -> None:
         parsed_url.scheme != "https"
         or parsed_url.hostname != "chatgpt.com"
         or "/c/" not in parsed_url.path
+        # A just-sent prompt sits at a client-only placeholder until ChatGPT
+        # assigns the conversation, and that placeholder cannot be reopened.
+        or "/c/local-" in parsed_url.path
     ):
         raise ValueError("invalid ChatGPT conversation URL")
 
@@ -662,19 +700,14 @@ async def _extract_sources(page, response) -> list[ChatGPTSource]:
     pills = response.locator(CITATION_PILL_SELECTOR)
     for index in range(await pills.count()):
         pill = pills.nth(index)
-        direct_links = pill.locator("a[href]")
-        if await direct_links.count():
-            direct_link = direct_links.first
-            direct_source = _source_from_link(
-                await direct_link.get_attribute("href"), await direct_link.inner_text()
-            )
-            if direct_source is not None:
-                sources.append(direct_source)
-
         await pill.hover(force=True, timeout=5_000)
         await page.wait_for_timeout(750)
         popovers = page.locator(SOURCE_POPOVER_SELECTOR)
         if not await popovers.count():
+            # The pill only shows the site name, so the host stands in as title.
+            direct_source = _source_from_link(await pill.get_attribute("href"), "")
+            if direct_source is not None:
+                sources.append(direct_source)
             continue
         popover = popovers.first
         counter = re.search(r"\b\d+/(\d+)\b", await popover.inner_text())
@@ -740,16 +773,24 @@ def _stall_message(stall_seconds: float) -> str:
     )
 
 
+async def _last_turn_key(page) -> str | None:
+    turns = page.locator(TURN_SELECTOR)
+    if not await turns.count():
+        return None
+    return await turns.last.get_attribute(TURN_KEY_ATTRIBUTE)
+
+
 async def _wait_for_first_response(
     page,
     previous_count: int,
+    previous_turn: str | None,
     stall_seconds: float | None,
     surface: ComposerSurface,
 ) -> None:
     try:
         await page.wait_for_function(
             surface.first_response_script,
-            arg=[surface.assistant_selector, previous_count],
+            arg=[surface.assistant_selector, previous_count, previous_turn],
             timeout=_first_response_timeout_ms(stall_seconds),
         )
     except PlaywrightTimeoutError as error:
@@ -825,6 +866,7 @@ class _ReplyMonitor:
 async def _wait_for_reply(
     page,
     previous_count: int,
+    previous_turn: str | None,
     status_callback: StatusCallback | None,
     stall_seconds: float | None,
     surface: ComposerSurface,
@@ -832,11 +874,10 @@ async def _wait_for_reply(
     keepalive_task = asyncio.create_task(_keep_page_active(page))
     try:
         await _wait_for_first_response(
-            page, previous_count, stall_seconds, surface
+            page, previous_count, previous_turn, stall_seconds, surface
         )
         _emit_status(status_callback, "ChatGPT is responding...")
-        response = page.locator(surface.assistant_selector).last
-        turn_id = await response.evaluate(TURN_ID_SCRIPT)
+        turn_id = await _last_turn_key(page)
         monitor = _ReplyMonitor(status_callback, stall_seconds)
         state_argument = reply_state_argument(previous_count, turn_id)
         while not monitor.observe(
@@ -1001,10 +1042,21 @@ async def _set_model(page, model: ChatGPTModel) -> None:
         if await option.get_attribute("aria-checked") == "true":
             await _close_advanced_menus(page)
             return
+        # An inert option still counts as visible but ignores clicks.
+        if await option.evaluate(INERT_OPTION_SCRIPT):
+            await root_menu.locator(MODEL_VIEW_TOGGLE_SELECTOR).click()
+            await page.wait_for_function(
+                f"option => !({INERT_OPTION_SCRIPT})(option)",
+                arg=await option.element_handle(),
+                timeout=10_000,
+            )
         try:
             await option.click()
         except Exception:
             await option.click(force=True)
+        # Picking a model returns the menu to its simple view and leaves it open.
+        if await root_menu.is_visible():
+            await _close_advanced_menus(page)
         return
 
     submenu_items = root_menu.locator(REASONING_SUBMENU_ITEM_SELECTOR)
@@ -1205,6 +1257,7 @@ async def send_message_on_page(
         )
 
         previous_count = await page.locator(surface.assistant_selector).count()
+        previous_turn = await _last_turn_key(page)
         _emit_status(status_callback, "Typing message...")
         await _type_question_like_human(editor, question, surface)
 
@@ -1219,6 +1272,7 @@ async def send_message_on_page(
         answer = await _wait_for_reply(
             page,
             previous_count,
+            previous_turn,
             status_callback,
             stall_seconds,
             surface,

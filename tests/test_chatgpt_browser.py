@@ -33,6 +33,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.root_menu.first = self.root_menu
         self.root_menu.wait_for = AsyncMock()
         self.root_menu.inner_text = AsyncMock()
+        self.root_menu.is_visible = AsyncMock(return_value=False)
         self.advanced_view = Mock()
         self.advanced_view.count = AsyncMock(return_value=1)
         self.advanced_view.click = AsyncMock()
@@ -57,6 +58,10 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.inline_model_option = Mock()
         self.inline_model_option.get_attribute = AsyncMock(return_value=None)
         self.inline_model_option.click = AsyncMock()
+        self.inline_model_option.evaluate = AsyncMock(return_value=False)
+        self.inline_model_option.element_handle = AsyncMock()
+        self.model_view_toggle = Mock()
+        self.model_view_toggle.click = AsyncMock()
         self.inline_model_match = Mock()
         self.inline_model_match.count = AsyncMock(return_value=0)
         self.inline_model_match.first = self.inline_model_option
@@ -68,6 +73,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             chatgpt_browser.REASONING_SUBMENU_ITEM_SELECTOR: self.submenu_items,
             chatgpt_browser.INLINE_REASONING_SELECTOR: self.inline_reasoning_controls,
             chatgpt_browser.REASONING_OPTION_SELECTOR: self.inline_model_options,
+            chatgpt_browser.MODEL_VIEW_TOGGLE_SELECTOR: self.model_view_toggle,
         }.get
 
         self.reasoning_menu = Mock()
@@ -92,11 +98,9 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.signed_out_marker.count = AsyncMock(return_value=0)
         self.responses = Mock()
         self.responses.count = AsyncMock(return_value=0)
-        self.responses.last.evaluate = AsyncMock(side_effect=lambda script: (
-            "conversation-turn-2"
-            if script == chatgpt_browser.TURN_ID_SCRIPT
-            else "OK."
-        ))
+        self.responses.last.evaluate = AsyncMock(return_value="OK.")
+        self.turns = Mock()
+        self.turns.count = AsyncMock(return_value=0)
         self.citation_pills = Mock()
         self.citation_pills.count = AsyncMock(return_value=0)
         self.responses.last.locator.return_value = self.citation_pills
@@ -131,6 +135,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: self.responses,
             chatgpt_browser.REASONING_TRIGGER_SELECTOR: self.reasoning_trigger,
             chatgpt_browser.SIGNED_OUT_MARKER_SELECTOR: self.signed_out_marker,
+            chatgpt_browser.TURN_SELECTOR: self.turns,
             chatgpt_browser.LIGHTWEIGHT_SURFACE.editor_selector: self.lightweight_editor,
             chatgpt_browser.LIGHTWEIGHT_SURFACE.send_selector: self.lightweight_send,
             chatgpt_browser.LIGHTWEIGHT_SURFACE.assistant_selector: (
@@ -317,6 +322,18 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.assertEqual(caught.exception.conversation_url, self.page.url)
         self.assertIn(self.page.url, str(caught.exception))
 
+    def test_unknown_delivery_ignores_the_placeholder_conversation(self) -> None:
+        # ChatGPT shows a client-only URL until it assigns the conversation, and
+        # a session that recorded it could never reopen that conversation.
+        error = chatgpt_browser._unknown_delivery(
+            chatgpt_browser.ReplyFailedError,
+            "lost",
+            "https://chatgpt.com/c/local-chatgpt%3A266e01d1-0b12-4517-8e2a-45767b782252",
+        )
+
+        self.assertIsNone(error.conversation_url)
+        self.assertEqual(str(error), "lost")
+
     def test_unknown_delivery_without_a_conversation_names_none(self) -> None:
         self.page.url = chatgpt_browser.CHATGPT_URL
         inert = [{"complete": False, "status": "思考中", "progress": 42}] * 3
@@ -426,16 +443,16 @@ class ChatGPTBrowserTests(unittest.TestCase):
 
     def test_state_script_requires_completion_controls_and_reads_notices(self) -> None:
         script = chatgpt_browser.RESPONSE_STATE_SCRIPT
-        self.assertIn('data-testid="copy-turn-action-button"', script)
-        self.assertIn('data-testid="regenerate-thread-error-button"', script)
-        self.assertIn("!element.closest('.prose')", script)
+        self.assertIn('button[aria-label="コピーする"]', script)
+        self.assertIn('[role="alert"]', script)
+        self.assertIn("[data-chatgpt-agent-turn-start]", script)
 
         argument = chatgpt_browser.reply_state_argument(
-            previous_count=2, turn_id="conversation-turn-4"
+            previous_count=2, turn_id="4b0c9d2e-turn"
         )
 
         self.assertEqual(argument["previousCount"], 2)
-        self.assertEqual(argument["turnId"], "conversation-turn-4")
+        self.assertEqual(argument["turnId"], "4b0c9d2e-turn")
         self.assertIn("メッセージ配信がタイムアウトしました", argument["noticeMarkers"])
 
     def test_missing_first_response_reports_unknown_delivery(self) -> None:
@@ -1005,6 +1022,28 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.inline_model_options.filter.assert_any_call(has_text="GPT-5.5")
         self.inline_model_option.click.assert_awaited_once_with()
         self.model_item.click.assert_not_awaited()
+        self.model_view_toggle.click.assert_not_awaited()
+
+    def test_inline_menu_opens_the_inert_model_panel_before_choosing(self) -> None:
+        self.submenu_items.count.return_value = 0
+        self.inline_model_match.count.return_value = 1
+        self.inline_model_option.evaluate.return_value = True
+        self.root_menu.is_visible.return_value = True
+        events = []
+        self.model_view_toggle.click.side_effect = lambda: events.append("toggle")
+        self.page.wait_for_function.side_effect = (
+            lambda *args, **kwargs: events.append("panel active")
+        )
+        self.inline_model_option.click.side_effect = lambda: events.append("option")
+
+        asyncio.run(chatgpt_browser._set_model(
+            self.page, chatgpt_browser.ChatGPTModel.GPT_5_5
+        ))
+
+        # Clicking the option while its panel is still inert would do nothing.
+        self.assertEqual(events, ["toggle", "panel active", "option"])
+        # Choosing leaves the menu open, so it is closed before anything else.
+        self.page.keyboard.press.assert_any_await("Escape")
 
     def test_inline_reasoning_uses_numeric_aria_value_not_label(self) -> None:
         self.submenu_items.count.return_value = 0
@@ -1137,11 +1176,9 @@ class ChatGPTBrowserTests(unittest.TestCase):
                 * chatgpt_browser.MILLISECONDS_PER_SECOND,
             )
         completion_predicate = chatgpt_browser.RESPONSE_STATE_SCRIPT
-        self.assertIn('data-testid="stop-button"', completion_predicate)
-        self.assertIn("request-placeholder-", completion_predicate)
+        self.assertIn('button[aria-label="停止"]', completion_predicate)
+        self.assertIn("data-markdown-animated", completion_predicate)
         self.assertIn('aria-busy="true"', completion_predicate)
-        self.assertIn("streaming-animation", completion_predicate)
-        self.assertIn("ariaLabel.endsWith('中')", completion_predicate)
 
     def test_reports_native_chatgpt_activity_changes(self) -> None:
         status_callback = Mock()
@@ -1209,6 +1246,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
                 chatgpt_browser.SEND_BUTTON_SELECTOR: second_button,
                 chatgpt_browser.ASSISTANT_MESSAGE_SELECTOR: second_responses,
                 chatgpt_browser.SIGNED_OUT_MARKER_SELECTOR: second_signed_out,
+                chatgpt_browser.TURN_SELECTOR: self.turns,
             }.get
 
             entered = 0
@@ -1336,13 +1374,9 @@ class ChatGPTBrowserTests(unittest.TestCase):
         pills = Mock()
         pills.count = AsyncMock(return_value=1)
         pill = pills.nth.return_value
-        direct_links = pill.locator.return_value
-        direct_links.count = AsyncMock(return_value=1)
-        direct_link = direct_links.first
-        direct_link.get_attribute = AsyncMock(return_value=(
+        pill.get_attribute = AsyncMock(return_value=(
             "https://example.com/report?utm_source=chatgpt.com"
         ))
-        direct_link.inner_text = AsyncMock(return_value="example.com")
         pill.hover = AsyncMock()
         response.locator.return_value = pills
 
@@ -1369,7 +1403,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
         pills = Mock()
         pills.count = AsyncMock(return_value=1)
         pill = pills.nth.return_value
-        pill.locator.return_value.count = AsyncMock(return_value=0)
+        pill.get_attribute = AsyncMock()
         pill.hover = AsyncMock()
         response.locator.return_value = pills
 

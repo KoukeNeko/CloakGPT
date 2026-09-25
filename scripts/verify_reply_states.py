@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check CloakGPT's reply-state script against ChatGPT's real turn markup.
 
-Each scenario rebuilds an assistant turn the way ChatGPT rendered it on
-2026-09-13, including the notices it shows when a reply is lost, and runs the
+Each scenario rebuilds a conversation turn the way ChatGPT rendered it on
+2026-09-26, including the alert it shows when a reply is lost, and runs the
 same state script CloakGPT polls with in a real Chromium page.
 
 Usage:
@@ -22,12 +22,13 @@ from cloakbrowser import launch_async  # noqa: E402
 
 import chatgpt_browser  # noqa: E402
 
-TURN_TEST_ID = "conversation-turn-2"
+TURN_KEY = "a5260bf4-22b1-4e24-a53f-01c5b8e59bae"
 RECONNECTING_NOTICE = "接続が中断されました。回答の完了を待っています"
 DELIVERY_TIMEOUT_NOTICE = "メッセージ配信がタイムアウトしました。もう一度お試しください。"
+FAILED_FETCH_NOTICE = "Failed to fetch"
 RETRY_LABEL = "再試行"
-THINKING_LABEL = "思考中"
-CHECKED_FIELDS = ("complete", "generating", "notice")
+SEARCHING_LABEL = "ウェブを検索中"
+CHECKED_FIELDS = ("complete", "generating", "notice", "status")
 
 
 @dataclass(frozen=True)
@@ -38,168 +39,176 @@ class Scenario:
     expected: dict
 
 
-def message_html(message_id: str, content_html: str) -> str:
+def user_part_html() -> str:
     return (
-        f'<div data-message-author-role="assistant" data-message-id="{message_id}" '
-        'class="min-h-8 text-message relative flex w-full flex-col items-end gap-2 '
-        f'text-start break-words whitespace-normal">{content_html}</div>'
+        "<h4>あなたの発言:</h4>"
+        '<div data-chatgpt-search-unit-key="fallback-turn-0:0:user" '
+        f'data-chatgpt-search-message-ids="{TURN_KEY}">'
+        '<div data-content-search-unit-key="fallback-turn-0:0:user"><div>'
+        '<div data-user-message-bubble="true"><div dir="auto">Hello</div></div>'
+        '<span data-state="closed"><button type="button" '
+        'aria-label="メッセージをコピーする"><svg></svg></button></span>'
+        "</div></div></div>"
     )
 
 
-def answer_message_html(answer_html: str) -> str:
-    body = (
-        '<div class="flex w-full flex-col gap-1 empty:hidden"><div>'
-        '<div class="QKycbG_markdown text-token-text-primary text-base leading-6 '
-        'markdown prose dark:prose-invert wrap-break-word w-full dark '
-        f'markdown-new-styling">{answer_html}</div></div></div>'
-    )
-    return message_html("e9542774-ab48-4ebe-8984-a67dc964fcaa", body)
-
-
-def notice_message_html(banner_classes: str, notice: str, retry: bool) -> str:
-    retry_button = (
-        '<button data-testid="regenerate-thread-error-button" '
-        'class="btn relative btn-secondary"><div class="flex w-full items-center '
-        f'justify-center gap-1.5">{RETRY_LABEL}</div></button>'
-        if retry
-        else ""
-    )
-    paragraph = f"<p>{notice}</p>" if notice else ""
-    body = (
-        '<div class="flex w-full flex-col gap-1 empty:hidden"></div>'
-        f'<div class="{banner_classes}"><div class="flex min-w-0 grow gap-3 items-start">'
-        '<div class="min-w-0 grow pt-[2px] ps-1"><div class="flex flex-row items-center '
-        'justify-between gap-4"><div class="min-w-0 text-pretty break-words '
-        'whitespace-pre-wrap"><div class="markdown break-words [&>:last-child]:mb-0">'
-        f"{paragraph}</div></div></div></div></div>{retry_button}</div>"
-    )
-    return message_html("c1af10f4-be59-4e55-a1d5-71d37db420a7", body)
-
-
-def reconnecting_notice_html() -> str:
-    return notice_message_html(
-        "text-token-text-primary border-token-border-default flex items-center gap-6 "
-        "rounded-2xl border text-sm px-3 py-2.5 mb-2 w-full self-start mask-shimmer-muted",
-        RECONNECTING_NOTICE,
-        retry=False,
+def answer_unit_html(answer_html: str, streaming: bool) -> str:
+    animated = " data-markdown-animated=\"\"" if streaming else ""
+    return (
+        '<div data-content-search-unit-key="fallback-turn-0:2:assistant" '
+        'data-chatgpt-search-unit-key="fallback-turn-0:2:assistant">'
+        '<h4 data-conversation-role="assistant" tabindex="-1">ChatGPT の発言:</h4>'
+        '<div data-chatgpt-selection-conversation-id="6ab6b7c6-ccd4-83ee-801f-61dbdd622094">'
+        '<span hidden=""></span>'
+        f'<div dir="auto"{animated} data-markdown-text-style="assistant-message">'
+        f"{answer_html}</div></div></div>"
     )
 
 
-def error_notice_html(notice: str) -> str:
-    return notice_message_html(
-        "text-token-text-error border-token-surface-error/15 bg-token-surface-error/5 "
-        "flex items-center gap-6 rounded-2xl border text-sm px-3 py-2.5 mb-2 w-full self-start",
-        notice,
-        retry=True,
+def activity_html(label: str) -> str:
+    # The label is doubled by an aria-hidden shimmer overlay.
+    return (
+        "<div><div><div><span><span><svg></svg></span><span><span><span>"
+        f'{label}<span aria-hidden="true"><span>{label}</span></span>'
+        "</span></span></span></span></div></div></div>"
     )
 
 
-def placeholder_message_html() -> str:
-    body = (
-        '<div class="flex w-full flex-col gap-1 empty:hidden"><div aria-busy="true" '
-        'class="text-token-text-tertiary flex min-h-8 items-start gap-2 text-base">'
-        '<div class="loading-shimmer-tertiary text-token-text-tertiary pb-0.5 select-none">'
-        f"{THINKING_LABEL}</div></div></div>"
-    )
-    return message_html(
-        "request-placeholder-request-6aa64a35-b130-83e8-8301-10250033e7f3-0", body
+def agent_area_html(content_html: str) -> str:
+    return (
+        '<div><span hidden="" data-chatgpt-agent-turn-start=""></span>'
+        f'{content_html}<span hidden=""></span></div>'
     )
 
 
 def action_bar_html() -> str:
     return (
-        '<div class="flex justify-start"><div role="group" aria-label="応答アクション">'
-        '<button aria-label="回答をコピーする" data-testid="copy-turn-action-button" '
-        'data-state="closed" type="button"><span>copy</span></button>'
-        '<button aria-label="共有する" data-state="closed" type="button">share</button>'
-        "</div></div>"
+        '<div><div><span data-state="closed"><button type="button" '
+        'aria-label="コピーする"><svg></svg></button></span>'
+        '<span data-state="closed"><button type="button" aria-label="共有">'
+        "<svg></svg></button></span>"
+        '<button type="button" aria-label="回答を再生成" aria-haspopup="menu">'
+        "<svg></svg></button></div></div>"
     )
 
 
-def turn_html(messages_html: str, controls_html: str = "") -> str:
+def waiting_status_html() -> str:
     return (
-        f'<section data-testid="{TURN_TEST_ID}" data-turn="assistant">'
-        '<h4 class="sr-only select-none">ChatGPT:</h4><div class="text-base my-auto mx-auto">'
-        '<div data-conversation-screenshot-content="" class="flex w-full min-w-0 flex-col">'
-        f'<div class="flex max-w-full flex-col gap-4 grow">{messages_html}</div>'
-        f"{controls_html}</div></div></section>"
+        '<div><span aria-busy="true" role="status"><span>ChatGPT が応答中</span>'
+        '<span aria-hidden="true"></span></span></div>'
+    )
+
+
+def alert_html(notice: str) -> str:
+    return (
+        '<div><aside role="alert"><div aria-hidden="true"></div><div><div><div>'
+        f"<div>{notice}</div></div></div><div><button type=\"button\">{RETRY_LABEL}"
+        "</button></div></div></aside></div>"
+    )
+
+
+def turn_html(reply_html: str) -> str:
+    return (
+        f'<div data-turn-key="{TURN_KEY}"><div data-content-search-turn-key="fallback-turn-0">'
+        f"<div><div>{user_part_html()}</div>{reply_html}</div></div></div>"
     )
 
 
 def composer_html(stop_visible: bool) -> str:
     button = (
-        '<button data-testid="stop-button" aria-label="ストリーミングの停止">stop</button>'
+        '<button type="button" aria-label="停止"><svg></svg></button>'
         if stop_visible
-        else '<button data-testid="send-button" aria-label="プロンプトを送信する">send</button>'
+        else '<button type="submit" aria-label="送信"><svg></svg></button>'
     )
-    return f'<form><div id="prompt-textarea" contenteditable="true"></div>{button}</form>'
+    return (
+        '<form><div contenteditable="true" role="textbox" data-composer-markdown="">'
+        f"</div>{button}</form>"
+    )
+
+
+def state(complete=False, generating=False, notice=None, status=None) -> dict:
+    return {
+        "complete": complete,
+        "generating": generating,
+        "notice": notice,
+        "status": status,
+    }
 
 
 def build_scenarios() -> list[Scenario]:
-    finished = {"complete": True, "generating": False, "notice": None}
+    finished = state(complete=True)
     return [
         Scenario(
-            "reconnecting while ChatGPT still polls",
-            turn_html(reconnecting_notice_html() + placeholder_message_html()),
+            "waiting before ChatGPT shows anything",
+            turn_html(waiting_status_html()),
             stop_visible=True,
-            expected={"complete": False, "generating": True, "notice": RECONNECTING_NOTICE},
+            expected=state(generating=True),
         ),
         Scenario(
-            "reconnecting notice left after polling stopped",
-            turn_html(reconnecting_notice_html()),
-            stop_visible=False,
-            expected={"complete": False, "generating": False, "notice": RECONNECTING_NOTICE},
+            "searching the web before the answer",
+            turn_html(agent_area_html(activity_html(SEARCHING_LABEL))),
+            stop_visible=True,
+            expected=state(generating=True, status=SEARCHING_LABEL),
         ),
         Scenario(
-            "delivery timeout with a retry button",
-            turn_html(error_notice_html(DELIVERY_TIMEOUT_NOTICE)),
-            stop_visible=False,
-            expected={"complete": False, "generating": False, "notice": DELIVERY_TIMEOUT_NOTICE},
+            "answer still streaming",
+            turn_html(agent_area_html(answer_unit_html("<p>OK so</p>", streaming=True))),
+            stop_visible=True,
+            expected=state(generating=True),
         ),
         Scenario(
-            "retry button without a message",
-            turn_html(error_notice_html("")),
+            "answer animating after the stop button left",
+            turn_html(agent_area_html(answer_unit_html("<p>OK so</p>", streaming=True))),
             stop_visible=False,
-            expected={"complete": False, "generating": False, "notice": RETRY_LABEL},
+            expected=state(generating=True),
+        ),
+        Scenario(
+            "answer text before its controls render",
+            turn_html(agent_area_html(answer_unit_html("<p>OK.</p>", streaming=False))),
+            stop_visible=False,
+            expected=state(),
         ),
         Scenario(
             "finished answer with its copy control",
-            turn_html(answer_message_html("<p>OK.</p>"), action_bar_html()),
+            turn_html(
+                agent_area_html(answer_unit_html("<p>OK.</p>", streaming=False))
+                + action_bar_html()
+            ),
             stop_visible=False,
             expected=finished,
         ),
         Scenario(
             "finished answer that quotes a notice",
             turn_html(
-                answer_message_html(f"<p>你收到的「{RECONNECTING_NOTICE}」是連線提示。</p>"),
-                action_bar_html(),
+                agent_area_html(answer_unit_html(
+                    f"<p>你收到的「{RECONNECTING_NOTICE}」是連線提示。</p>",
+                    streaming=False,
+                ))
+                + action_bar_html()
             ),
             stop_visible=False,
             expected=finished,
         ),
         Scenario(
-            "finished answer nesting markdown that quotes a notice",
+            "reply lost before it started",
+            turn_html(alert_html(FAILED_FETCH_NOTICE)),
+            stop_visible=False,
+            expected=state(notice=FAILED_FETCH_NOTICE),
+        ),
+        Scenario(
+            "reply lost after part of the answer",
             turn_html(
-                answer_message_html(
-                    f'<blockquote><div class="markdown"><p>{DELIVERY_TIMEOUT_NOTICE}</p>'
-                    "</div></blockquote>"
-                ),
-                action_bar_html(),
+                agent_area_html(answer_unit_html("<p>OK so</p>", streaming=False))
+                + alert_html(DELIVERY_TIMEOUT_NOTICE)
             ),
             stop_visible=False,
-            expected=finished,
+            expected=state(notice=DELIVERY_TIMEOUT_NOTICE),
         ),
         Scenario(
-            "answer text before its controls render",
-            turn_html(answer_message_html("<p>OK.</p>")),
-            stop_visible=False,
-            expected={"complete": False, "generating": False, "notice": None},
-        ),
-        Scenario(
-            "answer still streaming",
-            turn_html(answer_message_html("<p>OK so far</p>")),
+            "known notice wording beside the answer while ChatGPT retries",
+            turn_html(agent_area_html(activity_html(RECONNECTING_NOTICE))),
             stop_visible=True,
-            expected={"complete": False, "generating": True, "notice": None},
+            expected=state(generating=True, notice=RECONNECTING_NOTICE),
         ),
     ]
 
@@ -213,7 +222,7 @@ async def evaluate_scenario(page, scenario: Scenario) -> dict:
     )
     return await page.evaluate(
         chatgpt_browser.RESPONSE_STATE_SCRIPT,
-        chatgpt_browser.reply_state_argument(previous_count=0, turn_id=TURN_TEST_ID),
+        chatgpt_browser.reply_state_argument(previous_count=0, turn_id=TURN_KEY),
     )
 
 
