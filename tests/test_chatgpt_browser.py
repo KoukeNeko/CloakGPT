@@ -730,6 +730,43 @@ class ChatGPTBrowserTests(unittest.TestCase):
         ]
         self.assertEqual(announcements, ["ChatGPT activity: 思考中"])
 
+    def test_growing_activity_announces_only_the_new_text(self) -> None:
+        # Thinking summaries stream into the activity text; repeating the whole
+        # text on every poll would grow the output quadratically.
+        states = [
+            {"complete": False, "status": "思考中 江總", "progress": 1},
+            {"complete": False, "status": "思考中 江總 工程監", "progress": 2},
+            {"complete": False, "status": "ウェブを検索中 江總 工程監", "progress": 3},
+            {"complete": True, "status": None, "progress": 4},
+        ]
+        self.page.evaluate = AsyncMock(side_effect=states)
+        status_callback = Mock()
+
+        asyncio.run(
+            chatgpt_browser.send_message_on_page(
+                self.page,
+                chatgpt_browser.CHATGPT_URL,
+                "Hello",
+                None,
+                None,
+                status_callback,
+            )
+        )
+
+        announcements = [
+            call.args[0]
+            for call in status_callback.call_args_list
+            if call.args and call.args[0].startswith("ChatGPT activity:")
+        ]
+        self.assertEqual(
+            announcements,
+            [
+                "ChatGPT activity: 思考中 江總",
+                "ChatGPT activity: …工程監",
+                "ChatGPT activity: ウェブを検索中 江總 工程監",
+            ],
+        )
+
     def test_scales_human_typing_delay_for_long_questions(self) -> None:
         short_range = chatgpt_browser._human_typing_delay_range("Hello")
         long_range = chatgpt_browser._human_typing_delay_range("x" * 2_000)

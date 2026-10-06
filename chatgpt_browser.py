@@ -838,7 +838,13 @@ class _ReplyMonitor:
     ) -> str | None:
         if not value or value == announced:
             return announced
-        _emit_status(self._status_callback, f"{label}: {value}")
+        # Streaming thinking text extends the previous value; repeating all of
+        # it on every poll would make the output grow quadratically.
+        if announced and value.startswith(announced):
+            message = f"…{value[len(announced):].strip()}"
+        else:
+            message = value
+        _emit_status(self._status_callback, f"{label}: {message}")
         return value
 
     def _record_progress(self, state: dict) -> None:
