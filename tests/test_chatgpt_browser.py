@@ -762,7 +762,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             announcements,
             [
                 "ChatGPT activity: 思考中 江總",
-                "ChatGPT activity: …工程監",
+                "ChatGPT activity: 工程監",
                 "ChatGPT activity: ウェブを検索中 江總 工程監",
             ],
         )

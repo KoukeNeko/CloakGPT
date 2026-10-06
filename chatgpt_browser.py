@@ -841,7 +841,7 @@ class _ReplyMonitor:
         # Streaming thinking text extends the previous value; repeating all of
         # it on every poll would make the output grow quadratically.
         if announced and value.startswith(announced):
-            message = f"…{value[len(announced):].strip()}"
+            message = value[len(announced):].strip()
         else:
             message = value
         _emit_status(self._status_callback, f"{label}: {message}")
