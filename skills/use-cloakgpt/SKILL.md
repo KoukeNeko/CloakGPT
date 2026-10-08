@@ -64,8 +64,8 @@ reasoning level, ask them to run `cloakgpt login` first.
 
 Supported model values are:
 
+- `gpt-6`
 - `gpt-5.6-sol`
-- `gpt-5.5`
 
 Supported reasoning values are:
 

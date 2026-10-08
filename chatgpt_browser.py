@@ -88,8 +88,8 @@ class StringEnum(str, Enum):
 
 
 class ChatGPTModel(StringEnum):
+    GPT_6 = "gpt-6"
     GPT_5_6_SOL = "gpt-5.6-sol"
-    GPT_5_5 = "gpt-5.5"
 
 
 class ReasoningLevel(StringEnum):
@@ -103,8 +103,8 @@ class ProfileInUseError(RuntimeError):
 
 
 MODEL_LABELS = {
+    ChatGPTModel.GPT_6: "GPT-6",
     ChatGPTModel.GPT_5_6_SOL: "GPT-5.6 Sol",
-    ChatGPTModel.GPT_5_5: "GPT-5.5",
 }
 
 REASONING_LEVEL_INDEXES = {

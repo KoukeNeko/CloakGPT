@@ -339,8 +339,8 @@ Model values:
 
 | CLI value | ChatGPT label |
 | --- | --- |
+| `gpt-6` | GPT-6 |
 | `gpt-5.6-sol` | GPT-5.6 Sol |
-| `gpt-5.5` | GPT-5.5 |
 
 Reasoning values:
 
@@ -373,7 +373,7 @@ cloakgpt serve
 | `--api-key KEY` | None | Require Bearer token authentication (`Authorization: Bearer <KEY>`) |
 | `--session ID` | None | Pin all requests to a persistent session ID |
 | `--stateless` | Disabled | Force `send_once` on every request instead of smart session continuity |
-| `--model MODEL` | Default | Override default ChatGPT model (`gpt-5.5`, `gpt-5.6-sol`, etc.) |
+| `--model MODEL` | Default | Override default ChatGPT model (`gpt-6`, `gpt-5.6-sol`) |
 | `--reasoning LEVEL` | Default | Override default reasoning effort (`fast`, `medium`, `high`) |
 | `--headed` | Headless | Display the browser window during automation |
 | `--timezone TZ` | `Asia/Taipei` | IANA timezone for the browser environment |
@@ -384,7 +384,7 @@ In your tool's OpenAI-compatible settings:
 - **API Provider**: `OpenAI Compatible`
 - **Base URL**: `http://127.0.0.1:8000/v1` (or `http://<LAN-IP>:8000/v1`)
 - **API Key**: any non-empty string (or your `--api-key` value)
-- **Model ID**: `gpt-5.5` or `gpt-5.6-sol`
+- **Model ID**: `gpt-6` or `gpt-5.6-sol`
 
 ### Key Capabilities
 

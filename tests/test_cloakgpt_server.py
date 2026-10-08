@@ -120,14 +120,14 @@ class TestOpenAIFormatter(unittest.TestCase):
 
     def test_format_completion_response(self):
         response = OpenAIFormatter.completion(
-            model="gpt-5.5",
+            model="gpt-6",
             content="大湖公園和碧湖公園都很適合散步，搭捷運文湖線即可抵達。",
             prompt_tokens=18,
             completion_tokens=25,
         )
         self.assertTrue(response["id"].startswith("chatcmpl-"))
         self.assertEqual(response["object"], "chat.completion")
-        self.assertEqual(response["model"], "gpt-5.5")
+        self.assertEqual(response["model"], "gpt-6")
         self.assertEqual(len(response["choices"]), 1)
         choice = response["choices"][0]
         self.assertEqual(choice["message"]["role"], "assistant")
@@ -138,7 +138,7 @@ class TestOpenAIFormatter(unittest.TestCase):
     def test_format_chunk_response(self):
         chunk = OpenAIFormatter.chunk(
             completion_id="chatcmpl-test1234",
-            model="gpt-5.5",
+            model="gpt-6",
             delta_content="大湖公園",
             created_time=1700000000,
             finish_reason=None,
@@ -151,7 +151,7 @@ class TestOpenAIFormatter(unittest.TestCase):
     def test_format_chunk_reasoning_content(self):
         chunk = OpenAIFormatter.chunk(
             completion_id="chatcmpl-test1234",
-            model="gpt-5.5",
+            model="gpt-6",
             reasoning_content="• ChatGPT activity: 思考中...\n",
             created_time=1700000000,
         )
@@ -256,11 +256,11 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
             self.assertEqual(resp.status, 200)
 
     def test_get_specific_model(self):
-        req = Request(f"{self.base_url}/v1/models/gpt-5.5", method="GET")
+        req = Request(f"{self.base_url}/v1/models/gpt-6", method="GET")
         with urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode("utf-8"))
-            self.assertEqual(data["id"], "gpt-5.5")
+            self.assertEqual(data["id"], "gpt-6")
             self.assertEqual(data["object"], "model")
 
     def test_get_unknown_model(self):
@@ -271,7 +271,7 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
 
     def test_post_chat_completions_non_stream(self):
         payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [{"role": "user", "content": "請推薦台北適合放鬆散步的地點。"}],
             "stream": False,
         }
@@ -285,13 +285,13 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(data["object"], "chat.completion")
-            self.assertEqual(data["model"], "gpt-5.5")
+            self.assertEqual(data["model"], "gpt-6")
             answer = data["choices"][0]["message"]["content"]
             self.assertIn("大安森林公園", answer)
 
     def test_post_chat_completions_stream(self):
         payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [{"role": "user", "content": "請推薦台北適合放鬆散步的地點。"}],
             "stream": True,
         }
@@ -323,7 +323,7 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
 
     def test_post_chat_completions_with_reasoning_effort(self):
         payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [{"role": "user", "content": "分析演算法複雜度。"}],
             "reasoning_effort": "high",
         }
@@ -347,7 +347,7 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
         self.mock_broker_requester.side_effect = slow_broker
 
         payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [{"role": "user", "content": "請慢慢回答。"}],
             "stream": True,
         }
@@ -383,7 +383,7 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
         self.mock_broker_requester.side_effect = RuntimeError("ChatGPT 頁面斷線")
 
         payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [{"role": "user", "content": "測試錯誤傳遞。"}],
             "stream": True,
         }
@@ -424,7 +424,7 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
         self.mock_broker_requester.side_effect = status_emitting_broker
 
         payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [{"role": "user", "content": "測試 Thinking 狀態。"}],
             "stream": True,
         }
@@ -463,7 +463,7 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
 
         # Turn 1
         payload_1 = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [{"role": "user", "content": "目前專案是什麼內容"}],
         }
         req_1 = Request(
@@ -484,7 +484,7 @@ class TestOpenAIServerEndpoints(unittest.TestCase):
 
         # Turn 2: Follow-up in same conversation
         payload_2 = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [
                 {"role": "user", "content": "目前專案是什麼內容"},
                 {"role": "assistant", "content": "這是一個 Go 專案。"},

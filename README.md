@@ -150,7 +150,7 @@ cloakgpt serve
 Configure your client with:
 
 - Base URL: `http://127.0.0.1:8000/v1`
-- Model ID: `gpt-5.5` or `gpt-5.6-sol`
+- Model ID: `gpt-6` or `gpt-5.6-sol`
 - API key: any non-empty value, or the value passed to `--api-key`
 
 Streaming replies start immediately and send keep-alive comments, so clients

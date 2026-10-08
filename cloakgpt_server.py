@@ -23,7 +23,7 @@ from cloakgpt_session import request_broker
 
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8000
-DEFAULT_CHATGPT_MODEL = ChatGPTModel.GPT_5_5.value
+DEFAULT_CHATGPT_MODEL = ChatGPTModel.GPT_6.value
 SSE_DATA_PREFIX = "data: "
 SSE_TERMINAL_MARKER = b"data: [DONE]\n\n"
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -32,8 +32,8 @@ BEARER_AUTH_PREFIX = "Bearer "
 
 # Models advertised in /v1/models
 DEFAULT_SERVER_MODELS = [
+    ChatGPTModel.GPT_6.value,
     ChatGPTModel.GPT_5_6_SOL.value,
-    ChatGPTModel.GPT_5_5.value,
 ]
 
 BrokerRequester = Callable[..., dict[str, Any]]

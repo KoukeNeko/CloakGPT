@@ -79,7 +79,7 @@ def run_harness(use_live: bool = False) -> bool:
     print(f"    發送提示: {NATURAL_USER_PROMPT}")
     try:
         payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [
                 {"role": "user", "content": NATURAL_USER_PROMPT}
             ],
@@ -111,7 +111,7 @@ def run_harness(use_live: bool = False) -> bool:
     print(f"\n[測試 3] POST /v1/chat/completions (串流 SSE 日常對話)...")
     try:
         payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [
                 {"role": "user", "content": "分享一道簡單美味的家常番茄炒蛋料理步驟。"}
             ],
@@ -164,7 +164,7 @@ def run_harness(use_live: bool = False) -> bool:
     print("\n[測試 4] 測試智慧 Session 延續多輪對話 (追問第 2 輪)...")
     try:
         followup_payload = {
-            "model": "gpt-5.5",
+            "model": "gpt-6",
             "messages": [
                 {"role": "user", "content": NATURAL_USER_PROMPT},
                 {"role": "assistant", "content": "這是第一輪的推薦回答。"},

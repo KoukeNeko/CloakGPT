@@ -483,7 +483,7 @@ class CloakGPTCliTests(unittest.TestCase):
                     "ask",
                     "Hello",
                     "--model",
-                    "gpt-5.5",
+                    "gpt-6",
                     "--reasoning",
                     "high",
                     "--timezone",
@@ -497,7 +497,7 @@ class CloakGPTCliTests(unittest.TestCase):
             {
                 "operation": "send_once",
                 "question": "Hello",
-                "model": "gpt-5.5",
+                "model": "gpt-6",
                 "reasoning": "high",
             },
             headless=True,
