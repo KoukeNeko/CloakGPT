@@ -20,6 +20,7 @@ from playwright.sync_api import Error as PlaywrightError
 from chatgpt_browser import (
     CHATGPT_URL,
     ChatGPTModel,
+    DEFAULT_MODEL,
     DEFAULT_PROFILE_DIR,
     REASONING_TRIGGER_SELECTOR,
     ReasoningLevel,
@@ -253,7 +254,7 @@ def _add_shared_options(
         "--model",
         type=ChatGPTModel,
         choices=list(ChatGPTModel),
-        help="model; omit to keep ChatGPT's current setting",
+        help=f"model (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
         "--reasoning",

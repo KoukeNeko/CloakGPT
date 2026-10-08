@@ -310,7 +310,8 @@ so responses can be redirected or piped without status lines:
 
 ```text
 [status] Opening ChatGPT...
-[status] Current page: model=GPT-5.6 Sol, reasoning=high, url=https://chatgpt.com/
+[status] Selecting model: gpt-6
+[status] Current page: model=GPT-6, reasoning=high, url=https://chatgpt.com/
 [status] Sending message...
 [status] Waiting for ChatGPT response (Ctrl+C to stop)...
 [status] ChatGPT is responding...
@@ -350,9 +351,11 @@ Reasoning values:
 | `medium` | 中程度 |
 | `high` | 高い |
 
-Both options default to `None`. Omit an option to keep ChatGPT's current page
-setting. Availability depends on the signed-in account and workspace. If a
-requested option is unavailable, the CLI reports the visible menu instead of
+Omitting `--model` selects `gpt-6` before every message, including follow-ups
+in a session. Omitting `--reasoning` keeps ChatGPT's current page setting. A
+signed-out page has no model control, so the default is not applied there.
+Availability depends on the signed-in account and workspace. If a model or
+reasoning level is unavailable, the CLI reports the visible menu instead of
 using a private ChatGPT API.
 
 ## OpenAI-compatible API server
@@ -373,7 +376,7 @@ cloakgpt serve
 | `--api-key KEY` | None | Require Bearer token authentication (`Authorization: Bearer <KEY>`) |
 | `--session ID` | None | Pin all requests to a persistent session ID |
 | `--stateless` | Disabled | Force `send_once` on every request instead of smart session continuity |
-| `--model MODEL` | Default | Override default ChatGPT model (`gpt-6`, `gpt-5.6-sol`) |
+| `--model MODEL` | None | Model for every request, overriding the one a request names (`gpt-6`, `gpt-5.6-sol`). Without it, a request uses the model it names, or `gpt-6` when it names none |
 | `--reasoning LEVEL` | Default | Override default reasoning effort (`fast`, `medium`, `high`) |
 | `--headed` | Headless | Display the browser window during automation |
 | `--timezone TZ` | `Asia/Taipei` | IANA timezone for the browser environment |

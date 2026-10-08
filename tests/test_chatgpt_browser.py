@@ -185,9 +185,15 @@ class ChatGPTBrowserTests(unittest.TestCase):
             list("First"),
         )
         self.send_button.click.assert_called_once_with()
-        self.model_option.click.assert_not_called()
         self.reasoning_option.click.assert_not_called()
         self.assertTrue(self.launch_context.call_args.kwargs["headless"])
+
+    def test_selects_the_default_model_when_none_is_requested(self) -> None:
+        chatgpt_browser.start_conversation("Hello", profile_dir=self.profile_dir)
+
+        self.model_item.click.assert_called_once_with()
+        self.reasoning_options.filter.assert_called_once_with(has_text="GPT-6")
+        self.model_option.click.assert_called_once_with()
 
     def test_types_question_with_per_character_human_delays(self) -> None:
         editor = Mock()
@@ -911,8 +917,9 @@ class ChatGPTBrowserTests(unittest.TestCase):
             profile_dir=self.profile_dir,
         )
 
-        self.assertEqual(self.reasoning_trigger.click.call_count, 2)
-        self.advanced_view.click.assert_called_once_with()
+        # Default model, reasoning level, then the status read.
+        self.assertEqual(self.reasoning_trigger.click.call_count, 3)
+        self.assertEqual(self.advanced_view.click.call_count, 2)
         self.reasoning_item.click.assert_called_once_with()
         self.reasoning_options.nth.assert_called_once_with(2)
         self.reasoning_option.click.assert_called_once_with()
@@ -941,19 +948,6 @@ class ChatGPTBrowserTests(unittest.TestCase):
         self.assertGreaterEqual(self.page.keyboard.press.call_count, 2)
         self.page.keyboard.press.assert_called_with("Escape")
 
-    def _check_only_model(self, label: str) -> None:
-        unchecked = Mock()
-        unchecked.count = AsyncMock(return_value=0)
-        self.inline_model_options.filter.side_effect = (
-            lambda has_text: self.inline_model_match if has_text == label else unchecked
-        )
-        self.inline_model_match.count.return_value = 1
-        self.inline_model_option.get_attribute.side_effect = {
-            "aria-checked": "true",
-            "data-state": None,
-            "aria-current": None,
-        }.get
-
     def test_japanese_inline_menu_reports_status_and_submits(self) -> None:
         self.submenu_items.count.return_value = 0
         self.inline_reasoning_controls.count.return_value = 1
@@ -963,34 +957,20 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "aria-valuemax": "3",
             "aria-posinset": None,
         }.get
-        self._check_only_model("GPT-5.6 Sol")
-        status_callback = Mock()
-
-        answer = chatgpt_browser.start_conversation(
-            "hi",
-            status_callback=status_callback,
-            profile_dir=self.profile_dir,
+        # Only the GPT-6 row exists, so the result cannot depend on label order.
+        unchecked = Mock()
+        unchecked.count = AsyncMock(return_value=0)
+        self.inline_model_options.filter.side_effect = (
+            lambda has_text: self.inline_model_match
+            if has_text == "GPT-6"
+            else unchecked
         )
-
-        self.assertEqual(answer, "OK.")
-        status_callback.assert_any_call(
-            "Current page: model=GPT-5.6 Sol, reasoning=high, "
-            "url=https://chatgpt.com/c/test-conversation"
-        )
-        self.send_button.click.assert_awaited_once_with()
-
-    def test_inline_menu_reports_gpt_6_as_the_selected_model(self) -> None:
-        # With GPT-6 checked, ChatGPT's header and trigger show only the effort,
-        # so the checked model row is the only place the model can be read from.
-        self.submenu_items.count.return_value = 0
-        self.inline_reasoning_controls.count.return_value = 1
-        self.inline_reasoning_control.get_attribute.side_effect = {
-            "aria-valuenow": "2",
-            "aria-valuemin": "0",
-            "aria-valuemax": "2",
-            "aria-posinset": None,
+        self.inline_model_match.count.return_value = 1
+        self.inline_model_option.get_attribute.side_effect = {
+            "aria-checked": "true",
+            "data-state": None,
+            "aria-current": None,
         }.get
-        self._check_only_model("GPT-6")
         status_callback = Mock()
 
         answer = chatgpt_browser.start_conversation(
@@ -1004,6 +984,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             "Current page: model=GPT-6, reasoning=high, "
             "url=https://chatgpt.com/c/test-conversation"
         )
+        self.send_button.click.assert_awaited_once_with()
 
     def test_waits_for_composer_and_delayed_status_control(self) -> None:
         composer_ready = False
@@ -1037,7 +1018,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
             state="visible",
             timeout=chatgpt_browser.COMPOSER_TIMEOUT_MS,
         )
-        self.reasoning_trigger.wait_for.assert_awaited_once_with(
+        self.reasoning_trigger.wait_for.assert_awaited_with(
             state="visible",
             timeout=10_000,
         )
@@ -1165,6 +1146,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
     def test_unrecognized_status_menu_stops_before_submission(self) -> None:
         self.submenu_items.count.return_value = 0
         self.advanced_view.count.return_value = 0
+        self.inline_model_match.count.return_value = 1
         self.root_menu.inner_text.return_value = (
             "高い 高い、3件中3件目。左右の矢印キーでパワーを調整します。"
         )
@@ -1337,6 +1319,7 @@ class ChatGPTBrowserTests(unittest.TestCase):
                 self.page.url, "GPT-5.6 Sol", "high"
             )
             with (
+                patch("chatgpt_browser._set_model", new_callable=AsyncMock),
                 patch(
                     "chatgpt_browser._read_page_status",
                     new_callable=AsyncMock,

@@ -52,15 +52,17 @@ external ChatGPT conversation, so submit only messages the user requested.
 - Pass the question as one argument. Use the shell's safe argument quoting; do
   not interpolate the question into executable shell syntax.
 
-## Preserve page settings by default
+## Model and reasoning defaults
 
 Omit `--model` and `--reasoning` unless the user explicitly requests them.
-Omission preserves ChatGPT's current page settings.
+Omitting `--model` selects `gpt-6`. Omitting `--reasoning` preserves ChatGPT's
+current page setting.
 
 A signed-out page has no model or reasoning controls, so ChatGPT chooses for
-itself and both options are rejected rather than ignored; the reported page
-status reads `signed-out default`. If the user needs a specific model or
-reasoning level, ask them to run `cloakgpt login` first.
+itself, the default model is not applied, and both options are rejected rather
+than ignored; the reported page status reads `signed-out default`. If the user
+needs a specific model or reasoning level, ask them to run `cloakgpt login`
+first.
 
 Supported model values are:
 

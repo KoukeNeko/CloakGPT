@@ -17,13 +17,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
-from chatgpt_browser import ChatGPTModel, ReasoningLevel
+from chatgpt_browser import DEFAULT_MODEL, ChatGPTModel, ReasoningLevel
 from cloakgpt_session import request_broker
 
 
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8000
-DEFAULT_CHATGPT_MODEL = ChatGPTModel.GPT_6.value
+DEFAULT_CHATGPT_MODEL = DEFAULT_MODEL.value
 SSE_DATA_PREFIX = "data: "
 SSE_TERMINAL_MARKER = b"data: [DONE]\n\n"
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"

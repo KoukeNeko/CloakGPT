@@ -13,7 +13,7 @@ use the OpenAI API** — it operates the account you are already signed in to.
 
 - Persistent multi-turn conversations you can return to
 - Independent sessions running concurrently in one shared browser
-- Model and reasoning-level selection, or leave the page as it is
+- Model (GPT-6 by default) and reasoning-level selection
 - Markdown answers with their citation sources
 - An OpenAI-compatible HTTP API server (`cloakgpt serve`) for Cline, Cursor, and Open WebUI
 - Sign-in on a Linux server without a desktop, through an SSH-tunneled web viewer
@@ -105,8 +105,8 @@ cloakgpt ask "Explain CRDTs briefly." --session "$SESSION"
 cloakgpt ask "Now contrast them with OT." --session "$SESSION"
 ```
 
-Pick a model or reasoning level only when you mean to; omitting them keeps
-whatever the page is already set to:
+Omitting `--model` selects `gpt-6`; omitting `--reasoning` keeps whatever the
+page is already set to:
 
 ```sh
 cloakgpt ask "Design a rate limiter." --reasoning high --model gpt-5.6-sol

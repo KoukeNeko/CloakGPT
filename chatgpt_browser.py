@@ -102,6 +102,10 @@ class ProfileInUseError(RuntimeError):
     """Raised when Chromium cannot own CloakGPT's persistent profile."""
 
 
+# Chosen whenever no model is requested, so a reply never depends on which model
+# an earlier run left selected on the page.
+DEFAULT_MODEL = ChatGPTModel.GPT_6
+
 MODEL_LABELS = {
     ChatGPTModel.GPT_6: "GPT-6",
     ChatGPTModel.GPT_5_6_SOL: "GPT-5.6 Sol",
@@ -1250,9 +1254,10 @@ async def send_message_on_page(
                 page, model, reasoning_level, allow_signed_out
             )
         else:
-            if model is not None:
-                _emit_status(status_callback, f"Selecting model: {model}")
-                await _set_model(page, model)
+            if model is None:
+                model = DEFAULT_MODEL
+            _emit_status(status_callback, f"Selecting model: {model}")
+            await _set_model(page, model)
             if reasoning_level is not None:
                 _emit_status(status_callback, f"Selecting reasoning: {reasoning_level}")
                 await _set_reasoning_level(page, reasoning_level)
